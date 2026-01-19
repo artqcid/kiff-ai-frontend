@@ -1,4 +1,4 @@
-# KIFF Frontend
+# KIFF AI Frontend
 
 Vue 3 + TypeScript Frontend for the KIFF LangChain Agent.
 
@@ -58,6 +58,6 @@ This repository is designed to be used as a Git submodule in the main `langchain
 
 ```bash
 # In the main project:
-git submodule add <repository-url> frontend
+git submodule add https://github.com/YOUR_USERNAME/kiff-ai-frontend.git frontend
 git submodule update --init --recursive
 ```
