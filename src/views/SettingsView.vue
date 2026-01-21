@@ -280,7 +280,8 @@ const selectProvider = async (provider: Provider) => {
       await apiClient.setProvider(provider.name)
       currentProvider.value = provider.name
       showStatus(`✅ Provider '${provider.display_name}' aktiviert`, 'success')
-      await loadModelsForProfile()
+      // Reload everything to update provider status and models
+      await loadAllData()
     } else {
       showStatus(`❌ Provider-Validierung fehlgeschlagen: ${result.message}`, 'error')
     }
