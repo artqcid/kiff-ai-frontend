@@ -2,16 +2,12 @@
   <div class="chat-view">
     <div class="chat-header">
       <h2>💬 Chat mit Agent</h2>
-      <div class="chat-actions">
-        <button @click="loadHistory" class="btn-secondary">🔄 Reload</button>
-        <button @click="clearHistory" class="btn-danger">🗑️ Clear</button>
-      </div>
     </div>
 
-    <div class="status-bar" v-if="agentStatus">
+    <div class="status-bar" v-if="loading">
       <span class="spinner"></span>
       <span>{{ agentStatus }}</span>
-      <button @click="cancelRequest" class="btn-cancel">❌</button>
+      <button @click="cancelRequest" class="btn-cancel">❌ Abbrechen</button>
     </div>
 
     <div class="chat-messages" ref="messagesContainer">
@@ -25,7 +21,9 @@
         <div v-else :class="['message', msg.role]">
           <div class="message-header">
             <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
-            <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon">🔄</button>
+            <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
+              🔄
+            </button>
           </div>
           <div class="message-content">{{ msg.content }}</div>
           <div class="message-time" v-if="msg.timestamp">
@@ -38,7 +36,7 @@
     <div class="chat-input">
       <textarea
         v-model="userInput"
-        @keydown.enter.prevent="sendMessage"
+        @keydown.enter.prevent="handleEnter"
         placeholder="z.B. 'Erstelle ein Betriebskonzept für unser Event...'"
         rows="3"
         :disabled="loading"
@@ -51,17 +49,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { apiClient, type ChatHistoryItem } from '../api/client'
+
+const props = defineProps<{
+  serverRunning?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'clear-chat'): void
+}>()
 
 const messages = ref<ChatHistoryItem[]>([])
 const userInput = ref('')
 const loading = ref(false)
-const agentStatus = ref('')
+const agentStatus = ref('🤖 Agent denkt nach...')
 const messagesContainer = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
   await loadHistory()
+})
+
+watch(() => props.serverRunning, (isRunning) => {
+  if (!isRunning && loading.value) {
+    cancelRequest()
+  }
 })
 
 const loadHistory = async () => {
@@ -74,39 +86,46 @@ const loadHistory = async () => {
   }
 }
 
-const clearHistory = async () => {
-  if (!confirm('Chat-Verlauf wirklich löschen?')) return
-  
-  try {
-    await apiClient.clearChatHistory()
-    messages.value = []
-  } catch (error) {
-    console.error('Failed to clear history:', error)
-  }
-}
-
 const sendMessage = async () => {
-  if (!userInput.trim() || loading.value) return
+  if (!userInput.value.trim() || loading.value) return
+
+  if (!props.serverRunning) {
+    alert('⚠️ Server ist nicht gestartet! Bitte starte den Server in der Sidebar.')
+    return
+  }
 
   const input = userInput.value
   userInput.value = ''
   loading.value = true
   agentStatus.value = '🤖 Agent denkt nach...'
 
+  // Add user message optimistically
+  messages.value.push({
+    role: 'user',
+    content: input,
+    timestamp: new Date().toISOString()
+  })
+  await scrollToBottom()
+
   try {
     const response = await apiClient.chat({
       messages: [{ role: 'user', content: input }]
     })
     
-    // Reload history to get updated messages
-    await loadHistory()
-    agentStatus.value = ''
-  } catch (error) {
-    console.error('Chat error:', error)
-    agentStatus.value = ''
+    // Add agent response
     messages.value.push({
       role: 'assistant',
-      content: `❌ Fehler: ${error}`
+      content: response.response,
+      timestamp: new Date().toISOString()
+    })
+    
+    // Reload history to sync with backend
+    await loadHistory()
+  } catch (error: any) {
+    console.error('Chat error:', error)
+    messages.value.push({
+      role: 'assistant',
+      content: `❌ Fehler: ${error.response?.data?.detail || error.message}`
     })
   } finally {
     loading.value = false
@@ -115,19 +134,35 @@ const sendMessage = async () => {
 }
 
 const repeatMessage = async (msg: ChatHistoryItem) => {
+  if (loading.value) return
   userInput.value = msg.content
+  await nextTick()
   await sendMessage()
 }
 
 const cancelRequest = () => {
   loading.value = false
   agentStatus.value = ''
+  
   if (messages.value.length > 0) {
     const lastMsg = messages.value[messages.value.length - 1]
-    if (lastMsg.role === 'user') {
-      lastMsg.cancelled = true
+    if (lastMsg && lastMsg.role === 'user') {
+      messages.value.push({
+        role: 'assistant',
+        content: '❌ Anfrage abgebrochen',
+        cancelled: true
+      })
     }
   }
+}
+
+const handleEnter = async (e: KeyboardEvent) => {
+  if (e.shiftKey) {
+    // Shift+Enter = neue Zeile (Standard-Verhalten)
+    return
+  }
+  // Enter ohne Shift = senden
+  await sendMessage()
 }
 
 const formatTime = (timestamp: string) => {
@@ -147,32 +182,38 @@ const scrollToBottom = async () => {
 .chat-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 4rem);
+  height: 100vh;
+  padding: 1.5rem;
 }
 
 .chat-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #333;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2a2a2a;
 }
 
-.chat-actions {
-  display: flex;
-  gap: 0.5rem;
+.chat-header h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
 }
 
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background-color: #2a2a2a;
-  border-radius: 4px;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
   margin-bottom: 1rem;
   color: #ffa500;
+}
+
+.status-bar > span:first-of-type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .spinner {
@@ -190,62 +231,133 @@ const scrollToBottom = async () => {
   100% { transform: rotate(360deg); }
 }
 
+.btn-cancel {
+  padding: 0.5rem 1rem;
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-cancel:hover {
+  background-color: #dc2626;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
-  background-color: #000;
-  border: 1px solid #333;
+  background-color: #0a0a0a;
+  border: 1px solid #2a2a2a;
   border-radius: 8px;
   margin-bottom: 1rem;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
 }
 
 .empty-state {
   color: #666;
   text-align: center;
-  padding: 2rem;
+  padding: 3rem 1rem;
+  font-size: 1rem;
 }
 
 .message {
   margin-bottom: 1rem;
-  padding: 0.75rem;
+  padding: 1rem;
   border-radius: 8px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message.user {
   background-color: #0a2a52;
   margin-left: 10%;
+  border-left: 3px solid #646cff;
 }
 
 .message.assistant {
-  background-color: #151515;
+  background-color: #1a1a1a;
   margin-right: 10%;
+  border-left: 3px solid #10b981;
 }
 
 .message-cancelled {
-  padding: 0.75rem;
+  padding: 0.75rem 1rem;
   margin-bottom: 1rem;
   border-radius: 8px;
-  background-color: #8b0000;
-  color: #fff;
+  background-color: #4d1a1a;
+  border-left: 3px solid #ef4444;
+  color: #f87171;
+  font-weight: 500;
 }
 
 .message-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.message-header strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.btn-icon:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .message-content {
   line-height: 1.6;
   white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .message-time {
   font-size: 0.75rem;
   color: #666;
   margin-top: 0.5rem;
+  text-align: right;
 }
 
 .chat-input {
@@ -264,6 +376,7 @@ textarea {
   font-family: inherit;
   font-size: 1rem;
   resize: none;
+  transition: border-color 0.2s;
 }
 
 textarea:focus {
@@ -276,65 +389,25 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
-button {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s;
-}
-
 .btn-primary {
+  padding: 0.75rem 1.5rem;
   background-color: #646cff;
   color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .btn-primary:hover:not(:disabled) {
   background-color: #535bf2;
+  transform: translateY(-1px);
 }
 
-.btn-secondary {
-  background-color: #2a2a2a;
-  color: white;
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
-}
-
-.btn-secondary:hover {
-  background-color: #3a3a3a;
-}
-
-.btn-danger {
-  background-color: #8b0000;
-  color: white;
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
-}
-
-.btn-danger:hover {
-  background-color: #a00000;
-}
-
-.btn-cancel {
-  background-color: transparent;
-  color: white;
-  padding: 0.25rem 0.5rem;
-  font-size: 1rem;
-}
-
-.btn-icon {
-  background-color: transparent;
-  color: white;
-  padding: 0.25rem 0.5rem;
-  font-size: 1rem;
-}
-
-.btn-icon:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-button:disabled {
+.btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

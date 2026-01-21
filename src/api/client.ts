@@ -1,4 +1,5 @@
-import axios, { AxiosInstance } from 'axios'
+import axios from 'axios'
+import type { AxiosInstance } from 'axios'
 
 export interface HealthResponse {
   status: string
@@ -117,9 +118,13 @@ class ApiClient {
     return response.data
   }
 
-  async getModels(): Promise<{ models: Model[] }> {
+  async changeProfile(profileName: string): Promise<any> {
+    return this.setProfile(profileName)
+  }
+
+  async getModels(): Promise<Model[]> {
     const response = await this.client.get('/models')
-    return response.data
+    return response.data.models || []
   }
 
   // Chat
