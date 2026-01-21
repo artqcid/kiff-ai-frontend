@@ -3,9 +3,17 @@
     <div class="chat-header">
       <h2>💬 Chat mit Agent</h2>
       <div class="header-chips">
-        <p class="model-chip" v-if="currentModel">Aktives Modell: {{ currentModel }}</p>
-        <p class="profile-chip header" v-if="currentProfile">Aktives Profil: {{ currentProfile }}</p>
+        <p class="header-info" v-if="currentProfile || currentModel || currentProvider">
+          <span v-if="currentProfile" class="profile-chip">Profil: {{ currentProfileDisplayName }}</span>
+          <span v-if="currentModel" class="model-chip">Modell: {{ currentModelDisplayName }}</span>
+          <span v-if="currentProvider" class="provider-chip">({{ currentProviderDisplayName }})</span>
+        </p>
       </div>
+    </div>
+
+    <!-- Fallback Banner -->
+    <div v-if="showFallbackBanner" class="fallback-banner">
+      ⚠️ Provider derzeit nicht verfügbar - Fallback zu Lokal aktiviert
     </div>
 
     <div class="status-bar" v-if="loading">
@@ -54,8 +62,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, inject } from 'vue'
-import { apiClient, type ChatHistoryItem } from '../api/client'
+import { ref, onMounted, nextTick, watch, inject, computed } from 'vue'
+import { apiClient, type ChatHistoryItem, type CurrentProviderResponse } from '../api/client'
 
 const props = defineProps<{
   serverRunning?: boolean
@@ -67,21 +75,19 @@ const loading = ref(false)
 const agentStatus = ref('🤖 Anfrage wird verarbeitet...')
 const currentModel = ref('')
 const currentProfile = ref('')
+const currentProvider = ref('')
+const currentModelShortName = ref('')
+const currentProfileDisplayName = ref('')
+const currentProviderDisplayName = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
+const showFallbackBanner = ref(false)
+
+// Computed properties for display names
+const currentModelDisplayName = computed(() => currentModelShortName.value || currentModel.value)
 
 onMounted(async () => {
-  // Load current profile first for fallback rendering
-  try {
-    const cp = await apiClient.getCurrentProfile()
-    currentProfile.value = cp?.profile || 'general_chat'
-    // Setze auch das aktive Modell aus dem aktuellen Profil
-    if (cp?.model) {
-      currentModel.value = cp.model
-    }
-  } catch (e) {
-    currentProfile.value = 'general_chat'
-  }
+  await loadCurrentState()
   await loadHistory()
 })
 
@@ -95,6 +101,22 @@ watch(() => props.serverRunning, (isRunning) => {
     cancelRequest()
   }
 })
+
+const loadCurrentState = async () => {
+  try {
+    const current: CurrentProviderResponse = await apiClient.getCurrentProvider()
+    currentProfile.value = current.profile
+    currentProvider.value = current.provider
+    currentModel.value = current.model
+    currentProviderDisplayName.value = current.provider_display_name
+    currentProfileDisplayName.value = current.profile_display_name
+    currentModelShortName.value = current.model_short_name
+  } catch (e) {
+    console.error('Failed to load current state:', e)
+    currentProfile.value = 'general_chat'
+    currentProvider.value = 'lokal'
+  }
+}
 
 const loadHistory = async () => {
   try {
@@ -120,20 +142,14 @@ const sendMessage = async () => {
     return
   }
 
-  // Refresh current profile in case it was changed in Settings
-  try {
-    const cp = await apiClient.getCurrentProfile()
-    currentProfile.value = cp?.profile || currentProfile.value || 'general_chat'
-    // Aktualisiere auch das aktive Modell
-    if (cp?.model) {
-      currentModel.value = cp.model
-    }
-  } catch {}
+  // Refresh current state
+  await loadCurrentState()
 
   const input = userInput.value
   userInput.value = ''
   loading.value = true
   agentStatus.value = '🤖 Modell lädt oder generiert Antwort...'
+  showFallbackBanner.value = false
 
   // Add user message optimistically
   messages.value.push({
@@ -147,6 +163,14 @@ const sendMessage = async () => {
     const response = await apiClient.chat({
       messages: [{ role: 'user', content: input }]
     })
+    
+    // Check for fallback indicator
+    if (response.response.startsWith('⚠️')) {
+      showFallbackBanner.value = true
+      setTimeout(() => {
+        showFallbackBanner.value = false
+      }, 5000)
+    }
     
     // Add agent response
     messages.value.push({
@@ -243,12 +267,50 @@ const scrollToBottom = async () => {
 .header-chips {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-.model-chip {
-  margin-top: 0.25rem;
+.header-info {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.model-chip,
+.profile-chip,
+.provider-chip {
+  background-color: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
   color: #9ca3af;
-  font-size: 0.95rem;
+}
+
+.provider-chip {
+  color: #60a5fa;
+  border-color: #3b82f6;
+}
+
+.fallback-banner {
+  background-color: #f59e0b33;
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .status-bar {

@@ -52,6 +52,58 @@ export interface Profile {
 export interface Model {
   name: string
   description: string
+  display_name?: string
+  short_name?: string
+  context_size?: number
+  metadata?: {
+    context?: string
+    speed?: string
+    cost?: string
+    request_limit?: string
+    token_limit?: string
+  }
+}
+
+export interface Provider {
+  name: string
+  display_name: string
+  type: string
+  enabled: boolean
+  description: string
+  requires_api_key: boolean
+  has_api_key: boolean
+  is_current: boolean
+  features: {
+    streaming: boolean
+    function_calling: boolean
+    vision: boolean
+  }
+  rate_limits: {
+    requests_per_minute?: number | null
+    tokens_per_minute?: number | null
+    note?: string
+  }
+}
+
+export interface ProviderValidateResponse {
+  valid: boolean
+  message: string
+  details?: any
+}
+
+export interface CurrentProviderResponse {
+  provider: string
+  profile: string
+  model: string
+  provider_display_name: string
+  profile_display_name: string
+  model_short_name: string
+}
+
+export interface ProfileModelsResponse {
+  profile: string
+  provider: string
+  models: Model[]
 }
 
 export interface DocumentInfo {
@@ -260,6 +312,39 @@ class ApiClient {
 
   async exportGoogleDoc(sessionId: string, payload: { access_token: string; folder_id?: string; name?: string }): Promise<GoogleExportResponse> {
     const response = await this.client.post<GoogleExportResponse>(`/documents/google/export/${sessionId}`, payload)
+    return response.data
+  }
+
+  // Provider Management
+  async getProviders(): Promise<Provider[]> {
+    const response = await this.client.get<Provider[]>('/providers')
+    return response.data
+  }
+
+  async validateProvider(providerName: string, apiKey?: string): Promise<ProviderValidateResponse> {
+    const response = await this.client.post<ProviderValidateResponse>(
+      `/provider/${providerName}/validate`,
+      apiKey ? { api_key: apiKey } : {}
+    )
+    return response.data
+  }
+
+  async setProvider(providerName: string): Promise<any> {
+    const response = await this.client.post(`/provider/${providerName}/set`)
+    return response.data
+  }
+
+  async getCurrentProvider(): Promise<CurrentProviderResponse> {
+    const response = await this.client.get<CurrentProviderResponse>('/provider/current')
+    return response.data
+  }
+
+  async getProfileModels(profileName: string, provider?: string): Promise<ProfileModelsResponse> {
+    const params = provider ? { provider } : {}
+    const response = await this.client.get<ProfileModelsResponse>(
+      `/profile/${profileName}/models`,
+      { params }
+    )
     return response.data
   }
 }
