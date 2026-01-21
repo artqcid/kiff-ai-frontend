@@ -119,7 +119,7 @@ const loadData = async () => {
 
     // Load models
     const modelsData = await apiClient.getModels()
-    models.value = modelsData.models || []
+    models.value = Array.isArray(modelsData) ? modelsData : (modelsData as any)?.models || []
   } catch (error) {
     console.error('Failed to load data:', error)
     statusMessage.value = `Fehler beim Laden: ${error}`

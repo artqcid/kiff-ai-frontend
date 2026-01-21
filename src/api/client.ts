@@ -44,6 +44,7 @@ export interface ServerStatus {
 export interface Profile {
   name: string
   description: string
+  display_name?: string
 }
 
 export interface Model {
@@ -56,6 +57,36 @@ export interface DocumentInfo {
   path: string
   size: number
   type: string
+}
+
+export interface DocumentSessionResponse {
+  session_id: string
+  filename: string
+  message: string
+}
+
+export interface DocumentSessionMessage {
+  session_id: string
+  message: string
+}
+
+export interface DocumentVersionInfo {
+  version_id: string
+  filename: string
+  size: number
+  created_at: string
+}
+
+export interface DocumentSessionHistoryResponse {
+  session_id: string
+  versions: DocumentVersionInfo[]
+}
+
+export interface GoogleExportResponse {
+  session_id: string
+  file_id: string
+  name: string
+  message: string
 }
 
 class ApiClient {
@@ -162,6 +193,65 @@ class ApiClient {
 
   async deleteDocument(filename: string): Promise<any> {
     const response = await this.client.delete(`/documents/${filename}`)
+    return response.data
+  }
+
+  async uploadDocumentSession(file: File): Promise<DocumentSessionResponse> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await this.client.post<DocumentSessionResponse>('/documents/session', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return response.data
+  }
+
+  async exportDocumentSession(sessionId: string): Promise<{ blob: Blob; filename: string }> {
+    const response = await this.client.get(`/documents/session/${sessionId}/export`, {
+      responseType: 'blob'
+    })
+
+    let filename = 'export.docx'
+    const disposition = response.headers['content-disposition']
+    if (disposition) {
+      const match = /filename="?([^";]+)"?/i.exec(disposition)
+      if (match && match[1]) {
+        filename = match[1]
+      }
+    }
+
+    return { blob: response.data as Blob, filename }
+  }
+
+  async applyDocumentSession(sessionId: string, file: File): Promise<DocumentSessionMessage> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await this.client.post<DocumentSessionMessage>(`/documents/session/${sessionId}/apply`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return response.data
+  }
+
+  async getDocumentSessionHistory(sessionId: string): Promise<DocumentSessionHistoryResponse> {
+    const response = await this.client.get<DocumentSessionHistoryResponse>(`/documents/session/${sessionId}/history`)
+    return response.data
+  }
+
+  async deleteDocumentSession(sessionId: string): Promise<DocumentSessionMessage> {
+    const response = await this.client.delete<DocumentSessionMessage>(`/documents/session/${sessionId}`)
+    return response.data
+  }
+
+  async importGoogleDoc(docId: string): Promise<DocumentSessionResponse> {
+    const response = await this.client.post<DocumentSessionResponse>('/documents/google/import', { doc_id: docId })
+    return response.data
+  }
+
+  async exportGoogleDoc(sessionId: string, payload: { access_token: string; folder_id?: string; name?: string }): Promise<GoogleExportResponse> {
+    const response = await this.client.post<GoogleExportResponse>(`/documents/google/export/${sessionId}`, payload)
     return response.data
   }
 }

@@ -91,7 +91,7 @@ const loadDocuments = async () => {
 const handleFileUpload = (event: Event) => {
   const target = event.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
-    selectedFile.value = target.files[0]
+    selectedFile.value = target.files[0] || null
     uploadMessage.value = ''
   }
 }

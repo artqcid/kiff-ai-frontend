@@ -68,6 +68,85 @@
             🗑️ Chat löschen
           </button>
         </div>
+
+        <!-- Document Handling -->
+        <div class="control-group">
+          <h3>📄 Dokument</h3>
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept=".docx"
+            class="hidden-input"
+            @change="handleDocxSelected"
+          />
+          <input
+            ref="applyFileInputRef"
+            type="file"
+            accept=".docx"
+            class="hidden-input"
+            @change="handleDocxApplySelected"
+          />
+          <button @click="triggerDocxUpload" class="btn btn-primary btn-block" :disabled="loading">
+            DOCX laden
+          </button>
+          <button @click="triggerDocxApply" class="btn btn-secondary btn-block" :disabled="loading || !currentDocSessionId">
+            DOCX ersetzen
+          </button>
+          <button @click="exportDocx" class="btn btn-success btn-block" :disabled="loading || !currentDocSessionId">
+            DOCX exportieren
+          </button>
+          <button @click="loadHistory" class="btn btn-ghost btn-block" :disabled="loading || !currentDocSessionId">
+            Versionen anzeigen ({{ sessionHistory.length }})
+          </button>
+          <button @click="deleteSession" class="btn btn-ghost btn-block" :disabled="loading || !currentDocSessionId">
+            Session löschen
+          </button>
+
+          <div v-if="sessionHistory.length" class="history-box">
+            <div class="history-title">Versionen</div>
+            <ul class="history-list">
+              <li v-for="version in sessionHistory" :key="version.version_id">
+                <span>{{ version.filename }}</span>
+                <span class="muted">{{ new Date(version.created_at).toLocaleString() }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Google Docs -->
+        <div class="control-group">
+          <h3>☁️ Google Docs</h3>
+          <input
+            v-model="googleDocId"
+            type="text"
+            class="text-input"
+            placeholder="Google Doc ID"
+          />
+          <button @click="importGoogleDoc" class="btn btn-primary btn-block" :disabled="loading || !googleDocId">
+            Doc importieren → Session
+          </button>
+          <input
+            v-model="googleAccessToken"
+            type="text"
+            class="text-input"
+            placeholder="Access Token (Drive)"
+          />
+          <input
+            v-model="googleFolderId"
+            type="text"
+            class="text-input"
+            placeholder="Ordner-ID (optional)"
+          />
+          <input
+            v-model="googleFilename"
+            type="text"
+            class="text-input"
+            placeholder="Dateiname (optional)"
+          />
+          <button @click="exportGoogleDoc" class="btn btn-secondary btn-block" :disabled="loading || !currentDocSessionId || !googleAccessToken">
+            Session → Google Drive
+          </button>
+        </div>
       </div>
     </aside>
     
@@ -91,7 +170,15 @@ const selectedProfile = ref<string>('')
 const selectedModel = ref<string>('')
 const loading = ref(false)
 const statusMessage = ref('')
-const clearChatTrigger = ref(0);
+const clearChatTrigger = ref(0)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const applyFileInputRef = ref<HTMLInputElement | null>(null)
+const currentDocSessionId = ref<string>('')
+const sessionHistory = ref([] as { version_id: string; filename: string; size: number; created_at: string }[])
+const googleDocId = ref('')
+const googleAccessToken = ref('')
+const googleFolderId = ref('')
+const googleFilename = ref('')
 
 provide('clearChatTrigger', clearChatTrigger);
 
@@ -118,10 +205,10 @@ const loadData = async () => {
     }
     
     if (models.value.length > 0 && !selectedModel.value) {
-      selectedModel.value = models.value[0].name;
+      selectedModel.value = models.value[0]?.name || '';
     }
     if (profiles.value.length > 0 && !selectedProfile.value) {
-      selectedProfile.value = profiles.value[0].name;
+      selectedProfile.value = profiles.value[0]?.name || '';
     }
   } catch (error) {
     console.error('Failed to load data:', error)
@@ -212,6 +299,179 @@ const handleClearChat = async () => {
     statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`;
   } finally {
     loading.value = false;
+  }
+}
+
+// --- Document handling ---
+const triggerDocxUpload = () => {
+  fileInputRef.value?.click()
+}
+
+const triggerDocxApply = () => {
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Bitte zuerst eine Session laden'
+    return
+  }
+  applyFileInputRef.value?.click()
+}
+
+const handleDocxSelected = async (event: Event) => {
+  const files = (event.target as HTMLInputElement)?.files
+  if (!files || files.length === 0) return
+  const file = files[0]
+  if (!file || !file.name.toLowerCase().endsWith('.docx')) {
+    statusMessage.value = '❌ Bitte eine DOCX-Datei wählen'
+    return
+  }
+  loading.value = true
+  statusMessage.value = '📤 Lade DOCX...'
+  try {
+    const response = await apiClient.uploadDocumentSession(file as File)
+    currentDocSessionId.value = response.session_id
+    sessionHistory.value = []
+    statusMessage.value = `✅ ${response.filename} geladen (Session ${response.session_id.slice(0, 8)})`
+  } catch (error: any) {
+    statusMessage.value = `❌ Upload fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+    ;(event.target as HTMLInputElement).value = ''
+  }
+}
+
+const handleDocxApplySelected = async (event: Event) => {
+  const files = (event.target as HTMLInputElement)?.files
+  if (!files || files.length === 0) return
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Keine aktive Session'
+    return
+  }
+  const file = files[0]
+  if (!file || !file.name.toLowerCase().endsWith('.docx')) {
+    statusMessage.value = '❌ Bitte eine DOCX-Datei wählen'
+    return
+  }
+
+  loading.value = true
+  statusMessage.value = '✏️ Ersetze DOCX...'
+  try {
+    await apiClient.applyDocumentSession(currentDocSessionId.value, file as File)
+    statusMessage.value = '✅ Session aktualisiert'
+    await loadHistory()
+  } catch (error: any) {
+    statusMessage.value = `❌ Ersetzen fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+    ;(event.target as HTMLInputElement).value = ''
+  }
+}
+
+const exportDocx = async () => {
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Export: Bitte zuerst ein Dokument laden'
+    return
+  }
+
+  loading.value = true
+  statusMessage.value = '📦 Exportiere DOCX...'
+  try {
+    const { blob, filename } = await apiClient.exportDocumentSession(currentDocSessionId.value)
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename || 'export.docx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    statusMessage.value = `✅ Export fertig: ${filename}`
+  } catch (error: any) {
+    statusMessage.value = `❌ Export fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadHistory = async () => {
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Keine aktive Session'
+    return
+  }
+  loading.value = true
+  statusMessage.value = '📚 Lade Versionen...'
+  try {
+    const response = await apiClient.getDocumentSessionHistory(currentDocSessionId.value)
+    sessionHistory.value = response.versions
+    statusMessage.value = `✅ ${response.versions.length} Version(en) geladen`
+  } catch (error: any) {
+    statusMessage.value = `❌ History fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+  }
+}
+
+const deleteSession = async () => {
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Keine aktive Session'
+    return
+  }
+  if (!confirm('Session wirklich löschen?')) return
+
+  loading.value = true
+  statusMessage.value = '🧹 Lösche Session...'
+  try {
+    await apiClient.deleteDocumentSession(currentDocSessionId.value)
+    currentDocSessionId.value = ''
+    sessionHistory.value = []
+    statusMessage.value = '✅ Session gelöscht'
+  } catch (error: any) {
+    statusMessage.value = `❌ Löschen fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+  }
+}
+
+const importGoogleDoc = async () => {
+  if (!googleDocId.value) {
+    statusMessage.value = 'ℹ️ Bitte Doc ID angeben'
+    return
+  }
+  loading.value = true
+  statusMessage.value = '☁️ Importiere Google Doc...'
+  try {
+    const response = await apiClient.importGoogleDoc(googleDocId.value)
+    currentDocSessionId.value = response.session_id
+    sessionHistory.value = []
+    statusMessage.value = `✅ Importiert: ${response.filename} (Session ${response.session_id.slice(0, 8)})`
+  } catch (error: any) {
+    statusMessage.value = `❌ Import fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
+  }
+}
+
+const exportGoogleDoc = async () => {
+  if (!currentDocSessionId.value) {
+    statusMessage.value = 'ℹ️ Keine aktive Session'
+    return
+  }
+  if (!googleAccessToken.value) {
+    statusMessage.value = 'ℹ️ Access Token fehlt'
+    return
+  }
+
+  loading.value = true
+  statusMessage.value = '☁️ Lade nach Google Drive...'
+  try {
+    const response = await apiClient.exportGoogleDoc(currentDocSessionId.value, {
+      access_token: googleAccessToken.value,
+      folder_id: googleFolderId.value || undefined,
+      name: googleFilename.value || undefined,
+    })
+    statusMessage.value = `✅ Hochgeladen: ${response.name} (File ID: ${response.file_id})`
+  } catch (error: any) {
+    statusMessage.value = `❌ Drive-Export fehlgeschlagen: ${error?.message || 'Unknown error'}`
+  } finally {
+    loading.value = false
   }
 }
 </script>
@@ -340,6 +600,17 @@ body {
   cursor: pointer;
 }
 
+.text-input {
+  width: 100%;
+  padding: 0.625rem;
+  background-color: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.87);
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
 .select-input:focus {
   outline: none;
   border-color: #646cff;
@@ -396,12 +667,65 @@ body {
   background-color: #dc2626;
 }
 
+.btn-secondary {
+  background-color: #374151;
+  color: #e5e7eb;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #2b3340;
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: #e5e7eb;
+  border: 1px solid #2a2a2a;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: #111827;
+}
+
 .status-message {
   font-size: 0.875rem;
   padding: 0.5rem;
   background-color: #0a0a0a;
   border-radius: 4px;
   text-align: center;
+}
+
+.history-box {
+  background: #0f0f0f;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.history-title {
+  font-size: 0.875rem;
+  color: #bbb;
+  margin-bottom: 0.5rem;
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.history-list li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.muted {
+  color: #888;
+  font-size: 0.8rem;
 }
 
 .main-content {
