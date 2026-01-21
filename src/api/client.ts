@@ -33,6 +33,8 @@ export interface ChatHistoryItem {
   content: string
   timestamp?: string
   cancelled?: boolean
+  profile?: string
+  model?: string
 }
 
 export interface ServerStatus {
@@ -149,13 +151,19 @@ class ApiClient {
     return response.data
   }
 
+  async getCurrentProfile(): Promise<{ profile: string; model?: string | null }> {
+    const response = await this.client.get('/profile/current')
+    return response.data
+  }
+
   async changeProfile(profileName: string): Promise<any> {
     return this.setProfile(profileName)
   }
 
   async getModels(): Promise<Model[]> {
     const response = await this.client.get('/models')
-    return response.data.models || []
+    // API returns array directly, not wrapped
+    return Array.isArray(response.data) ? response.data : (response.data.models || [])
   }
 
   // Chat

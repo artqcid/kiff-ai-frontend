@@ -2,6 +2,10 @@
   <div class="chat-view">
     <div class="chat-header">
       <h2>💬 Chat mit Agent</h2>
+      <div class="header-chips">
+        <p class="model-chip" v-if="currentModel">Aktives Modell: {{ currentModel }}</p>
+        <p class="profile-chip header" v-if="currentProfile">Aktives Profil: {{ currentProfile }}</p>
+      </div>
     </div>
 
     <div class="status-bar" v-if="loading">
@@ -21,6 +25,7 @@
         <div v-else :class="['message', msg.role]">
           <div class="message-header">
             <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
+            <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
             <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
               🔄
             </button>
@@ -59,11 +64,24 @@ const props = defineProps<{
 const messages = ref<ChatHistoryItem[]>([])
 const userInput = ref('')
 const loading = ref(false)
-const agentStatus = ref('🤖 Agent denkt nach...')
+const agentStatus = ref('🤖 Anfrage wird verarbeitet...')
+const currentModel = ref('')
+const currentProfile = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 
 onMounted(async () => {
+  // Load current profile first for fallback rendering
+  try {
+    const cp = await apiClient.getCurrentProfile()
+    currentProfile.value = cp?.profile || 'general_chat'
+    // Setze auch das aktive Modell aus dem aktuellen Profil
+    if (cp?.model) {
+      currentModel.value = cp.model
+    }
+  } catch (e) {
+    currentProfile.value = 'general_chat'
+  }
   await loadHistory()
 })
 
@@ -81,7 +99,13 @@ watch(() => props.serverRunning, (isRunning) => {
 const loadHistory = async () => {
   try {
     const response = await apiClient.getChatHistory()
-    messages.value = response.history || []
+    const hist = (response.history || []).map((m: any) => {
+      if (m.role === 'assistant' && !m.profile) {
+        m.profile = currentProfile.value || 'general_chat'
+      }
+      return m
+    })
+    messages.value = hist
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to load history:', error)
@@ -96,10 +120,20 @@ const sendMessage = async () => {
     return
   }
 
+  // Refresh current profile in case it was changed in Settings
+  try {
+    const cp = await apiClient.getCurrentProfile()
+    currentProfile.value = cp?.profile || currentProfile.value || 'general_chat'
+    // Aktualisiere auch das aktive Modell
+    if (cp?.model) {
+      currentModel.value = cp.model
+    }
+  } catch {}
+
   const input = userInput.value
   userInput.value = ''
   loading.value = true
-  agentStatus.value = '🤖 Agent denkt nach...'
+  agentStatus.value = '🤖 Modell lädt oder generiert Antwort...'
 
   // Add user message optimistically
   messages.value.push({
@@ -118,8 +152,14 @@ const sendMessage = async () => {
     messages.value.push({
       role: 'assistant',
       content: response.response,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      profile: response.profile,
+      model: response.model
     })
+
+    if (response.model) {
+      currentModel.value = response.model
+    }
     
     // Reload history to sync with backend
     await loadHistory()
@@ -131,6 +171,7 @@ const sendMessage = async () => {
     })
   } finally {
     loading.value = false
+    agentStatus.value = ''
     await scrollToBottom()
   }
 }
@@ -197,6 +238,17 @@ const scrollToBottom = async () => {
 .chat-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
+}
+
+.header-chips {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.model-chip {
+  margin-top: 0.25rem;
+  color: #9ca3af;
+  font-size: 0.95rem;
 }
 
 .status-bar {
@@ -347,6 +399,21 @@ const scrollToBottom = async () => {
 
 .btn-icon:hover {
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.profile-chip {
+  margin-left: auto;
+  margin-right: 0.5rem;
+  background-color: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.profile-chip.header {
+  margin-left: 0;
 }
 
 .message-content {

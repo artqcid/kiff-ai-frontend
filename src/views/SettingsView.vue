@@ -38,14 +38,14 @@
     <div class="settings-section">
       <h3>🤖 Modell-Auswahl</h3>
       <div class="form-group">
-        <label for="model-select">Wechsle Modell:</label>
+        <label for="model-select">Aktives Modell (basierend auf Profil):</label>
         <select id="model-select" v-model="selectedModel" :disabled="loading">
           <option v-for="model in models" :key="model.name" :value="model.name">
-            {{ model.description }}
+            {{ model.name }} - {{ model.display_name || model.description }}
           </option>
         </select>
         <button @click="switchModel" :disabled="loading || !selectedModel" class="btn-primary">
-          Modell wechseln
+          Modell manuell wechseln (vorübergehend möglich)
         </button>
       </div>
     </div>
@@ -57,7 +57,7 @@
         <label for="profile-select">Wähle Profil:</label>
         <select id="profile-select" v-model="selectedProfile" :disabled="loading">
           <option v-for="profile in profiles" :key="profile.name" :value="profile.name">
-            {{ profile.name }} - {{ profile.description }}
+            {{ profile.display_name || profile.name }}
           </option>
         </select>
         <button @click="changeProfile" :disabled="loading || !selectedProfile" class="btn-primary">
@@ -71,16 +71,16 @@
       <h3>📋 Aktuelle Konfiguration</h3>
       <div class="config-grid">
         <div class="config-item">
-          <span class="label">Modell:</span>
-          <span class="value">{{ config?.model || 'N/A' }}</span>
+          <span class="label">Aktives Modell:</span>
+          <span class="value">{{ selectedModel || 'N/A' }}</span>
         </div>
         <div class="config-item">
-          <span class="label">Profil:</span>
-          <span class="value">{{ config?.profile || 'N/A' }}</span>
+          <span class="label">Aktives Profil:</span>
+          <span class="value">{{ selectedProfile || 'N/A' }}</span>
         </div>
         <div class="config-item">
-          <span class="label">Temperature:</span>
-          <span class="value">{{ config?.temperature || 'N/A' }}</span>
+          <span class="label">LLM Server:</span>
+          <span class="value">{{ config?.server?.llama_server_url || 'N/A' }}</span>
         </div>
       </div>
     </div>
@@ -108,8 +108,11 @@ const loadData = async () => {
   try {
     // Load config
     config.value = await apiClient.getConfig()
-    selectedProfile.value = config.value?.profile || 'default'
-    selectedModel.value = config.value?.model || ''
+    selectedProfile.value = config.value?.profile || 'general_chat'
+
+    // Load current profile to get active model
+    const currentProfileData = await apiClient.getCurrentProfile()
+    selectedModel.value = currentProfileData?.model || config.value?.model || 'mistral-7b'
 
     // Load server status
     serverStatus.value = await apiClient.getServerStatus()
@@ -118,8 +121,7 @@ const loadData = async () => {
     profiles.value = await apiClient.getProfiles()
 
     // Load models
-    const modelsData = await apiClient.getModels()
-    models.value = Array.isArray(modelsData) ? modelsData : (modelsData as any)?.models || []
+    models.value = await apiClient.getModels()
   } catch (error) {
     console.error('Failed to load data:', error)
     statusMessage.value = `Fehler beim Laden: ${error}`
@@ -184,7 +186,15 @@ const changeProfile = async () => {
   try {
     await apiClient.setProfile(selectedProfile.value)
     statusMessage.value = `✅ Profil gewechselt zu ${selectedProfile.value}!`
+    
+    // Nach Profilwechsel: aktuelle Konfiguration laden und Model-Dropdown aktualisieren
     await loadData()
+    
+    // Hole das aktive Model vom Backend und aktualisiere das Dropdown
+    const currentProfileData = await apiClient.getCurrentProfile()
+    if (currentProfileData?.model) {
+      selectedModel.value = currentProfileData.model
+    }
   } catch (error) {
     console.error('Failed to change profile:', error)
     statusMessage.value = `❌ Fehler beim Profil-Wechsel: ${error}`
