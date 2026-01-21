@@ -53,7 +53,7 @@
           <h3>👤 Profil</h3>
           <select v-model="selectedProfile" :disabled="loading" class="select-input">
             <option v-for="profile in profiles" :key="profile.name" :value="profile.name">
-              {{ profile.description || profile.name }}
+              {{ profile.display_name || profile.name }}
             </option>
           </select>
           <button @click="changeProfile" :disabled="loading || !selectedProfile" class="btn btn-primary btn-block">
@@ -111,6 +111,11 @@ const loadData = async () => {
     serverStatus.value = statusRes
     profiles.value = profilesRes
     models.value = modelsRes
+    
+    // Set initial status message based on server state (only if not already set)
+    if (!statusMessage.value) {
+      statusMessage.value = statusRes.llama_running ? '✅ Server gestartet' : 'Server gestoppt'
+    }
     
     if (models.value.length > 0 && !selectedModel.value) {
       selectedModel.value = models.value[0].name;
