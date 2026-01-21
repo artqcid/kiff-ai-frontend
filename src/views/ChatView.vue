@@ -49,15 +49,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick, watch, inject } from 'vue'
 import { apiClient, type ChatHistoryItem } from '../api/client'
 
 const props = defineProps<{
   serverRunning?: boolean
-}>()
-
-const emit = defineEmits<{
-  (e: 'clear-chat'): void
 }>()
 
 const messages = ref<ChatHistoryItem[]>([])
@@ -65,9 +61,15 @@ const userInput = ref('')
 const loading = ref(false)
 const agentStatus = ref('🤖 Agent denkt nach...')
 const messagesContainer = ref<HTMLElement | null>(null)
+const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 
 onMounted(async () => {
   await loadHistory()
+})
+
+// Watch for clear chat trigger from parent
+watch(clearChatTrigger, () => {
+  messages.value = [];
 })
 
 watch(() => props.serverRunning, (isRunning) => {

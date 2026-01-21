@@ -25,14 +25,14 @@
           </div>
           
           <div class="button-row">
-            <button @click="startServers" :disabled="loading" class="btn btn-success">
+            <button @click="startServers" :disabled="loading || serverStatus?.llama_running" class="btn btn-success">
               🟢 Starten
             </button>
-            <button @click="stopServers" :disabled="loading" class="btn btn-danger">
+            <button @click="stopServers" :disabled="loading || !serverStatus?.llama_running" class="btn btn-danger">
               🛑 Stoppen
             </button>
           </div>
-          <p v-if="statusMessage" class="status-message">{{ statusMessage }}</p>
+          <p class="status-message">{{ statusMessage || 'Bereit' }}</p>
         </div>
         
         <!-- Model Selection -->
@@ -74,7 +74,6 @@
     <!-- Main Content -->
     <main class="main-content">
       <router-view 
-        @clear-chat="handleClearChat"
         :server-running="serverStatus?.llama_running || false"
       />
     </main>
@@ -82,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, provide } from 'vue'
 import { apiClient, type ServerStatus, type Profile, type Model } from './api/client'
 
 const serverStatus = ref<ServerStatus | null>(null)
@@ -92,6 +91,9 @@ const selectedProfile = ref<string>('')
 const selectedModel = ref<string>('')
 const loading = ref(false)
 const statusMessage = ref('')
+const clearChatTrigger = ref(0);
+
+provide('clearChatTrigger', clearChatTrigger);
 
 onMounted(async () => {
   await loadData()
@@ -111,10 +113,10 @@ const loadData = async () => {
     models.value = modelsRes
     
     if (models.value.length > 0 && !selectedModel.value) {
-      selectedModel.value = models.value[0].name
+      selectedModel.value = models.value[0].name;
     }
     if (profiles.value.length > 0 && !selectedProfile.value) {
-      selectedProfile.value = profiles.value[0].name
+      selectedProfile.value = profiles.value[0].name;
     }
   } catch (error) {
     console.error('Failed to load data:', error)
@@ -128,7 +130,7 @@ const startStatusPolling = () => {
     } catch (error) {
       // Silent fail
     }
-  }, 5000)
+  }, 15000) // Check every 15 seconds
 }
 
 const startServers = async () => {
@@ -142,7 +144,6 @@ const startServers = async () => {
     statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`
   } finally {
     loading.value = false
-    setTimeout(() => statusMessage.value = '', 3000)
   }
 }
 
@@ -157,7 +158,6 @@ const stopServers = async () => {
     statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`
   } finally {
     loading.value = false
-    setTimeout(() => statusMessage.value = '', 3000)
   }
 }
 
@@ -172,7 +172,6 @@ const switchModel = async () => {
     statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`
   } finally {
     loading.value = false
-    setTimeout(() => statusMessage.value = '', 3000)
   }
 }
 
@@ -186,23 +185,28 @@ const changeProfile = async () => {
     statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`
   } finally {
     loading.value = false
-    setTimeout(() => statusMessage.value = '', 3000)
   }
 }
 
 const clearChat = async () => {
   if (!confirm('Chat-Verlauf wirklich löschen?')) return
-  handleClearChat()
+  await handleClearChat()
 }
 
 const handleClearChat = async () => {
+  loading.value = true;
+  statusMessage.value = 'Lösche Chat-Verlauf...';
   try {
-    await apiClient.clearChatHistory()
-    statusMessage.value = '✅ Chat gelöscht'
+    await apiClient.clearChatHistory();
+    
+    // Trigger clear in ChatView via inject
+    clearChatTrigger.value++;
+    
+    statusMessage.value = '✅ Chat-Verlauf gelöscht';
   } catch (error: any) {
-    statusMessage.value = `❌ Fehler: ${error.message}`
+    statusMessage.value = `❌ Fehler: ${error?.message || 'Unknown error'}`;
   } finally {
-    setTimeout(() => statusMessage.value = '', 3000)
+    loading.value = false;
   }
 }
 </script>
