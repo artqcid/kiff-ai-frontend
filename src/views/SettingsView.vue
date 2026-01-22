@@ -1,6 +1,6 @@
 <template>
   <div class="settings-view" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
-    <h2>⚙️ KIFF Settings</h2>
+    <h2>⚙️ KIFF-AI-Settings</h2>
 
     <!-- Provider Selection Section -->
     <div class="settings-section accordion">
@@ -9,33 +9,21 @@
         <h3>{{ narrow ? 'Prov.' : '🌐 LLM Provider' }}</h3>
       </div>
       <div v-show="expanded.provider" class="accordion-content">
-        <div class="provider-list">
-          <div 
-            v-for="provider in providers" 
-            :key="provider.name"
-            class="provider-item"
-            :class="{ 
-              active: provider.is_current, 
-              disabled: provider.requires_api_key && !provider.has_api_key 
-            }"
-            @click="selectProvider(provider)"
+        <div class="form-group">
+          <label for="provider-select">LLM Provider auswählen:</label>
+          <select 
+            id="provider-select" 
+            v-model="currentProvider" 
+            @change="handleProviderChange"
+            :disabled="loading"
           >
-            <div class="provider-radio">
-              <input 
-                type="radio" 
-                :value="provider.name" 
-                v-model="currentProvider"
-                :disabled="provider.requires_api_key && !provider.has_api_key"
-              />
-            </div>
-            <div class="provider-info">
-              <div class="provider-name">
-                {{ provider.display_name }}
-                <span v-if="provider.requires_api_key && !provider.has_api_key" class="badge">API-Key fehlt</span>
-              </div>
-              <div class="provider-description">{{ provider.description }}</div>
-            </div>
-          </div>
+            <option value="lokal">
+              Lokal - Lokale LLMs
+            </option>
+            <option value="groq">
+              Groq - Cloud LLMs
+            </option>
+          </select>
         </div>
         
         <!-- API Key Dialog -->
@@ -59,6 +47,18 @@
             {{ apiKeyMessage }}
           </p>
         </div>
+        
+        <!-- Provider Success Display -->
+        <div v-if="providerSuccess" class="provider-success-box">
+          <span class="success-icon">✅</span>
+          <span class="success-text">{{ providerSuccess }}</span>
+        </div>
+        
+        <!-- Provider Error Display -->
+        <div v-if="providerError" class="provider-error-box">
+          <span class="error-icon">❌</span>
+          <span class="error-text">{{ providerError }}</span>
+        </div>
       </div>
     </div>
 
@@ -69,30 +69,22 @@
         <h3>{{ narrow ? 'Prof.' : '👤 Agent-Profil' }}</h3>
       </div>
       <div v-show="expanded.profile" class="accordion-content">
-        <div class="profile-list">
-          <div 
-            v-for="profile in profiles" 
-            :key="profile.name"
-            class="profile-item"
-            :class="{ active: profile.name === selectedProfile }"
-            @click="selectProfile(profile.name)"
+        <div class="form-group">
+          <label for="profile-select">Agent-Profil auswählen:</label>
+          <select 
+            id="profile-select" 
+            v-model="selectedProfile" 
+            @change="handleProfileChange"
+            :disabled="loading"
           >
-            <div class="profile-radio">
-              <input type="radio" :value="profile.name" v-model="selectedProfile" />
-            </div>
-            <div class="profile-info">
-              <div class="profile-name">{{ profile.display_name || profile.name }}</div>
-              <div class="profile-description">{{ profile.description }}</div>
-            </div>
-          </div>
+            <option value="general_chat">
+              Schnelle Antworten
+            </option>
+            <option value="deep_analysis">
+              Tiefe Analyse
+            </option>
+          </select>
         </div>
-        <button 
-          @click="applyProfile" 
-          :disabled="loading || !selectedProfile" 
-          class="btn-primary"
-        >
-          Profil anwenden
-        </button>
       </div>
     </div>
 
@@ -179,6 +171,9 @@ const loading = ref(false)
 const statusMessage = ref('')
 const statusType = ref<'success' | 'error' | 'info'>('info')
 const validating = ref(false)
+const providerError = ref<string>('')
+const providerSuccess = ref<string>('')
+let successTimer: number | null = null
 
 // API Key Dialog
 const showApiKeyDialog = ref(false)
@@ -200,6 +195,14 @@ const narrow = computed(() => sidebarWidth.value < 300)
 const isResizing = ref(false)
 
 // Computed
+const selectedProviderInfo = computed(() => {
+  return providers.value.find(p => p.name === currentProvider.value)
+})
+
+const selectedProfileInfo = computed(() => {
+  return profiles.value.find(p => p.name === selectedProfile.value)
+})
+
 const selectedModelInfo = computed(() => {
   return availableModels.value.find(m => m.model_id === selectedModel.value)
 })
@@ -272,6 +275,14 @@ const selectProvider = async (provider: Provider) => {
     return
   }
   
+  // Clear previous messages
+  providerError.value = ''
+  providerSuccess.value = ''
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
+  
   // Validate and switch provider
   loading.value = true
   try {
@@ -279,18 +290,40 @@ const selectProvider = async (provider: Provider) => {
     if (result.valid) {
       await apiClient.setProvider(provider.name)
       currentProvider.value = provider.name
-      showStatus(`✅ Provider '${provider.display_name}' aktiviert`, 'success')
+      providerSuccess.value = `✅ Provider '${provider.display_name}' erfolgreich aktiviert`
+      showStatus(providerSuccess.value, 'success')
+      
+      // Auto-hide success message after 10 seconds
+      successTimer = window.setTimeout(() => {
+        providerSuccess.value = ''
+        successTimer = null
+      }, 10000)
+      
       // Reload everything to update provider status and models
       await loadAllData()
     } else {
-      showStatus(`❌ Provider-Validierung fehlgeschlagen: ${result.message}`, 'error')
+      providerError.value = `Provider-Validierung fehlgeschlagen: ${result.message}`
+      showStatus(`❌ ${providerError.value}`, 'error')
     }
-  } catch (error) {
+  } catch (error: any) {
+    const errorMsg = error.response?.data?.detail || error.message || String(error)
+    providerError.value = `Provider-Validierung fehlgeschlagen: ${errorMsg}`
     console.error('Failed to switch provider:', error)
-    showStatus(`❌ Fehler beim Wechsel: ${error}`, 'error')
+    showStatus(`❌ Fehler beim Wechsel: ${errorMsg}`, 'error')
   } finally {
     loading.value = false
   }
+}
+
+const handleProviderChange = async () => {
+  const provider = providers.value.find(p => p.name === currentProvider.value)
+  if (provider) {
+    await selectProvider(provider)
+  }
+}
+
+const handleProfileChange = async () => {
+  await selectProfile(selectedProfile.value)
 }
 
 const testApiKey = async () => {
@@ -337,11 +370,26 @@ const cancelApiKey = () => {
   apiKeyMessage.value = ''
 }
 
-const selectProfile = (profileName: string) => {
+const selectProfile = async (profileName: string) => {
+  if (profileName === selectedProfile.value) return // Already selected
+  
   selectedProfile.value = profileName
+  loading.value = true
+  
+  try {
+    await apiClient.setProfile(profileName)
+    showStatus(`✅ Profil gewechselt zu '${profileName}'`, 'success')
+    await loadModelsForProfile()
+  } catch (error) {
+    console.error('Failed to change profile:', error)
+    showStatus(`❌ Fehler beim Profil-Wechsel: ${error}`, 'error')
+  } finally {
+    loading.value = false
+  }
 }
 
 const applyProfile = async () => {
+  // Kept for backward compatibility, but not used anymore
   loading.value = true
   try {
     await apiClient.setProfile(selectedProfile.value)
@@ -409,15 +457,15 @@ const stopResize = () => {
   min-width: 250px;
   height: 100%;
   overflow-y: auto;
-  padding: 2rem;
+  padding: 1rem 1.5rem;
   background-color: #1a1a1a;
   color: #fff;
   position: relative;
 }
 
 h2 {
-  margin-bottom: 2rem;
-  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
 }
 
 .settings-section {
@@ -430,8 +478,8 @@ h2 {
 .accordion-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   cursor: pointer;
   background-color: #2a2a2a;
   transition: background-color 0.2s;
@@ -442,13 +490,13 @@ h2 {
 }
 
 .accordion-header .icon {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #999;
 }
 
 .accordion-header h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
 }
 
@@ -569,6 +617,14 @@ h2 {
 .api-key-message.error {
   background-color: #ef444433;
   color: #f87171;
+}
+
+/* Profile Description */
+.profile-description {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #9ca3af;
+  line-height: 1.4;
 }
 
 /* Profile List */
@@ -745,6 +801,67 @@ button:disabled {
 .status-message.info {
   background-color: #3b82f633;
   color: #60a5fa;
+}
+
+/* Provider Success Box */
+.provider-success-box {
+  margin-top: 1rem;
+  padding: 0.875rem;
+  background-color: #22c55e33;
+  border: 1px solid #22c55e;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+}
+
+.provider-success-box .success-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.provider-success-box .success-text {
+  color: #4ade80;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Provider Error Box */
+.provider-error-box {
+  margin-top: 1rem;
+  padding: 0.875rem;
+  background-color: #ef444433;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+}
+
+.provider-error-box .error-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.provider-error-box .error-text {
+  color: #f87171;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Resize Handle */

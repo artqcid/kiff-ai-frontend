@@ -1,14 +1,25 @@
 <template>
   <div class="chat-view">
     <div class="chat-header">
-      <h2>💬 Chat mit Agent</h2>
-      <div class="header-chips">
-        <p class="header-info" v-if="currentProfile || currentModel || currentProvider">
-          <span v-if="currentProfile" class="profile-chip">Profil: {{ currentProfileDisplayName }}</span>
-          <span v-if="currentModel" class="model-chip">Modell: {{ currentModelDisplayName }}</span>
-          <span v-if="currentProvider" class="provider-chip">({{ currentProviderDisplayName }})</span>
-        </p>
+      <div class="header-left">
+        <h2>💬 Chat mit Agent</h2>
+        <div class="header-chips">
+          <p class="header-info" v-if="currentProfile || currentModel || currentProvider">
+            <span v-if="currentProfile" class="profile-chip">Profil: {{ currentProfileDisplayName }}</span>
+            <span v-if="currentModel" class="model-chip">Modell: {{ currentModelDisplayName }}</span>
+            <span v-if="currentProvider" class="provider-chip">({{ currentProviderDisplayName }})</span>
+            <span v-if="rateLimits" class="limits-chip">{{ rateLimits }}</span>
+          </p>
+        </div>
       </div>
+      <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
+        🗑️ Chat löschen
+      </button>
+    </div>
+
+    <!-- Clear Chat Success Message -->
+    <div v-if="clearChatSuccess" class="clear-chat-success">
+      ✅ Chat-Verlauf erfolgreich gelöscht
     </div>
 
     <!-- Fallback Banner -->
@@ -79,9 +90,12 @@ const currentProvider = ref('')
 const currentModelShortName = ref('')
 const currentProfileDisplayName = ref('')
 const currentProviderDisplayName = ref('')
+const rateLimits = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 const showFallbackBanner = ref(false)
+const clearChatSuccess = ref(false)
+let clearSuccessTimer: number | null = null
 
 // Computed properties for display names
 const currentModelDisplayName = computed(() => currentModelShortName.value || currentModel.value)
@@ -111,10 +125,40 @@ const loadCurrentState = async () => {
     currentProviderDisplayName.value = current.provider_display_name
     currentProfileDisplayName.value = current.profile_display_name
     currentModelShortName.value = current.model_short_name
+    
+    // Load rate limits for remote providers
+    if (current.provider !== 'lokal') {
+      try {
+        const models = await apiClient.getProfileModels(current.profile, current.provider)
+        const modelInfo = models.models.find(m => m.model_id === current.model)
+        if (modelInfo?.metadata) {
+          let reqLimit = modelInfo.metadata.request_limit
+          let tokenLimit = modelInfo.metadata.token_limit
+          
+          // Remove text in parentheses
+          if (reqLimit) reqLimit = reqLimit.split('(')[0].trim()
+          if (tokenLimit) tokenLimit = tokenLimit.split('(')[0].trim()
+          
+          if (reqLimit || tokenLimit) {
+            rateLimits.value = `🔄 bis ${reqLimit || 'N/A'} | 🧮 bis ${tokenLimit || 'N/A'}`
+          } else {
+            rateLimits.value = ''
+          }
+        } else {
+          rateLimits.value = ''
+        }
+      } catch (e) {
+        console.error('Failed to load rate limits:', e)
+        rateLimits.value = ''
+      }
+    } else {
+      rateLimits.value = ''
+    }
   } catch (e) {
     console.error('Failed to load current state:', e)
     currentProfile.value = 'general_chat'
     currentProvider.value = 'lokal'
+    rateLimits.value = ''
   }
 }
 
@@ -163,6 +207,14 @@ const sendMessage = async () => {
     const response = await apiClient.chat({
       messages: [{ role: 'user', content: input }]
     })
+    
+    // Update rate limits from response metadata
+    if (response.metadata?.rate_limits) {
+      const rl = response.metadata.rate_limits
+      if (rl.remaining_requests || rl.remaining_tokens) {
+        rateLimits.value = `🔄 ${rl.remaining_requests || 'N/A'} | 🧮 ${rl.remaining_tokens || 'N/A'}`
+      }
+    }
     
     // Check for fallback indicator
     if (response.response.startsWith('⚠️')) {
@@ -222,7 +274,32 @@ const cancelRequest = () => {
     }
   }
 }
-
+const clearChat = async () => {
+  if (!confirm('⚠️ Chat-Verlauf wirklich löschen?')) return
+  
+  try {
+    await apiClient.clearChatHistory()
+    messages.value = []
+    showFallbackBanner.value = false
+    
+    // Show success message
+    clearChatSuccess.value = true
+    
+    // Clear any existing timer
+    if (clearSuccessTimer) {
+      clearTimeout(clearSuccessTimer)
+    }
+    
+    // Hide after 10 seconds
+    clearSuccessTimer = window.setTimeout(() => {
+      clearChatSuccess.value = false
+      clearSuccessTimer = null
+    }, 10000)
+  } catch (error) {
+    console.error('Failed to clear chat:', error)
+    alert('❌ Fehler beim Löschen des Chats')
+  }
+}
 const handleEnter = async (e: KeyboardEvent) => {
   if (e.shiftKey) {
     // Shift+Enter = neue Zeile (Standard-Verhalten)
@@ -254,14 +331,24 @@ const scrollToBottom = async () => {
 }
 
 .chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid #2a2a2a;
+  gap: 1rem;
+}
+
+.header-left {
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
+  margin-bottom: 0.5rem;
 }
 
 .header-chips {
@@ -281,18 +368,74 @@ const scrollToBottom = async () => {
 
 .model-chip,
 .profile-chip,
-.provider-chip {
+.provider-chip,
+.limits-chip {
   background-color: #0a0a0a;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
   padding: 0.25rem 0.75rem;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: #9ca3af;
 }
 
 .provider-chip {
   color: #60a5fa;
   border-color: #3b82f6;
+}
+
+.limits-chip {
+  color: #9ca3af;
+  border-color: #4b5563;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+}
+
+.btn-clear-chat {
+  padding: 0.5rem 1rem;
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn-clear-chat:hover {
+  background-color: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+}
+
+.btn-clear-chat:active {
+  transform: translateY(0);
+}
+
+.clear-chat-success {
+  background-color: #22c55e33;
+  border: 1px solid #22c55e;
+  color: #4ade80;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .fallback-banner {
