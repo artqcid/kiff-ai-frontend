@@ -98,6 +98,17 @@ const currentProfileDisplayName = ref('')
 const currentProviderDisplayName = ref('')
 const rateLimits = ref('')
 const maxRateLimits = ref({ requests: '', tokens: '' })
+// Cache für aktuelle Rate Limits pro Model (key: modelId)
+const rateLimitsCache = ref<Record<string, { 
+  remaining_requests: string, 
+  remaining_tokens: string, 
+  limit_requests: string, 
+  limit_tokens: string,
+  request_unit: string,
+  token_unit: string,
+  full_request_limit: string,
+  full_token_limit: string
+}>>({})
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 const showFallbackBanner = ref(false)
@@ -155,25 +166,108 @@ const loadCurrentState = async () => {
     // Load rate limits for remote providers
     if (current.provider !== 'lokal') {
       try {
-        const models = await apiClient.getProfileModels(current.profile, current.provider)
-        const modelInfo = models.models.find(m => m.model_id === current.model)
-        if (modelInfo?.metadata) {
-          let reqLimit = modelInfo.metadata.request_limit
-          let tokenLimit = modelInfo.metadata.token_limit
+        // Check cache first for current model
+        const cachedLimits = rateLimitsCache.value[current.model]
+        if (cachedLimits) {
+          // Use cached values (already consumed)
+          maxRateLimits.value = {
+            requests: cachedLimits.limit_requests,
+            tokens: cachedLimits.limit_tokens
+          }
           
-          // Remove text in parentheses
-          if (reqLimit) reqLimit = reqLimit.split('(')[0].trim()
-          if (tokenLimit) tokenLimit = tokenLimit.split('(')[0].trim()
+          // Build display with remaining values
+        const reqDisplay = cachedLimits.remaining_requests && cachedLimits.full_request_limit
+          ? `${cachedLimits.remaining_requests} von ${cachedLimits.full_request_limit}`
+          : cachedLimits.full_request_limit || 'N/A'
+        
+        // For tokens, show remaining for the FIRST limit (minute), keep second (day) unchanged
+        let tokenDisplay = 'N/A'
+        if (cachedLimits.full_token_limit) {
+          const tokenParts = cachedLimits.full_token_limit.split(',')
+          if (tokenParts.length > 1) {
+            // Multiple limits: show first with "xxx von", second as-is
+            const firstLimit = tokenParts[0].trim()
+            const secondLimit = tokenParts[1].trim()
+            const remainingVal = cachedLimits.remaining_tokens || 'xxx'
+            tokenDisplay = `${remainingVal} von ${firstLimit}, ${secondLimit}`
+              // Single limit
+              tokenDisplay = cachedLimits.remaining_tokens
+                ? `${cachedLimits.remaining_tokens} von ${cachedLimits.full_token_limit}`
+                : cachedLimits.full_token_limit
+            }
+          }
           
-          if (reqLimit || tokenLimit) {
-            // Store max limits for later use
-            maxRateLimits.value = { requests: reqLimit || '', tokens: tokenLimit || '' }
-            rateLimits.value = `🔄 bis ${reqLimit || 'N/A'} | 🧮 bis ${tokenLimit || 'N/A'}`
+          rateLimits.value = `🔄 Req Limit: ${reqDisplay} | 🧮 Token Limit: ${tokenDisplay}`
+        } else {
+          // No cache, load fresh limits from model metadata
+          const models = await apiClient.getProfileModels(current.profile, current.provider)
+          const modelInfo = models.models.find(m => m.model_id === current.model)
+          if (modelInfo?.metadata) {
+            let reqLimit = modelInfo.metadata.request_limit
+            let tokenLimit = modelInfo.metadata.token_limit
+            
+            // Clean up limits (remove text in parentheses)
+            let reqDisplay = reqLimit ? reqLimit.split('(')[0].trim() : ''
+            let tokenDisplay = tokenLimit ? tokenLimit.split('(')[0].trim() : ''
+            
+            // Extract last numeric value and unit for tracking consumption
+            let reqUnit = ''
+            let tokenUnit = ''
+            let reqValue = ''
+            let tokenValue = ''
+            
+            if (reqDisplay) {
+              const parts = reqDisplay.split(',')
+              const lastPart = parts[parts.length - 1].trim()
+              const match = lastPart.match(/(\d+\.?\d*[KM]?)(\/[a-z]+)/i)
+              if (match) {
+                reqValue = match[1]
+                reqUnit = match[2]
+              }
+            }
+            
+            if (tokenDisplay) {
+              const parts = tokenDisplay.split(',')
+              const lastPart = parts[parts.length - 1].trim()
+              const match = lastPart.match(/(\d+\.?\d*[KM]?)(\/[a-z]+)/i)
+              if (match) {
+                tokenValue = match[1]
+                tokenUnit = match[2]
+              }
+            }
+            
+            if (reqDisplay || tokenDisplay) {
+              // Store max limits and units for later use
+              maxRateLimits.value = { requests: reqValue || '', tokens: tokenValue || '' }
+              
+              // Check if cache needs update (config changed)
+              const existingCache = rateLimitsCache.value[current.model]
+              const configChanged = existingCache && (
+                existingCache.full_request_limit !== reqDisplay ||
+                existingCache.full_token_limit !== tokenDisplay
+              )
+              
+              // Initialize cache with max values (no consumption yet) or update if config changed
+              if (!existingCache || configChanged) {
+                rateLimitsCache.value[current.model] = {
+                  remaining_requests: reqValue || '',
+                  remaining_tokens: tokenValue || '',
+                  limit_requests: reqValue || '',
+                  limit_tokens: tokenValue || '',
+                  request_unit: reqUnit,
+                  token_unit: tokenUnit,
+                  full_request_limit: reqDisplay,
+                  full_token_limit: tokenDisplay
+                }
+              }
+              // Show full limit information initially
+              rateLimits.value = `🔄 Req Limit: ${reqDisplay || 'N/A'} | 🧮 Token Limit: ${tokenDisplay || 'N/A'}`
+            } else {
+              rateLimits.value = ''
+            }
           } else {
             rateLimits.value = ''
           }
-        } else {
-          rateLimits.value = ''
         }
       } catch (e) {
         console.error('Failed to load rate limits:', e)
@@ -239,14 +333,71 @@ const sendMessage = async () => {
     // Update rate limits from response metadata
     if (response.metadata?.rate_limits) {
       const rl = response.metadata.rate_limits
+      
+      // Update max limits if provided in response (override stored values)
+      if (rl.limit_requests) {
+        maxRateLimits.value.requests = rl.limit_requests
+      }
+      if (rl.limit_tokens) {
+        maxRateLimits.value.tokens = rl.limit_tokens
+      }
+      
       if (rl.remaining_requests || rl.remaining_tokens) {
-        const reqDisplay = rl.remaining_requests 
-          ? `${rl.remaining_requests} von ${maxRateLimits.value.requests}` 
-          : 'N/A'
-        const tokenDisplay = rl.remaining_tokens 
-          ? `${rl.remaining_tokens} von ${maxRateLimits.value.tokens}` 
-          : 'N/A'
-        rateLimits.value = `🔄 ${reqDisplay} | 🧮 ${tokenDisplay}`
+        // Get current cache to preserve full limit strings from config
+        const currentCache = rateLimitsCache.value[currentModel.value]
+        
+        // Update limits from API if provided (overrides config)
+        if (rl.limit_requests) {
+          maxRateLimits.value.requests = rl.limit_requests
+        }
+        if (rl.limit_tokens) {
+          maxRateLimits.value.tokens = rl.limit_tokens
+        }
+        
+        // Cache the rate limits for this model
+        rateLimitsCache.value[currentModel.value] = {
+          remaining_requests: rl.remaining_requests || '',
+          remaining_tokens: rl.remaining_tokens || '',
+          limit_requests: rl.limit_requests || maxRateLimits.value.requests,
+          limit_tokens: rl.limit_tokens || maxRateLimits.value.tokens,
+          request_unit: currentCache?.request_unit || '/min',
+          token_unit: currentCache?.token_unit || '/day',
+          full_request_limit: currentCache?.full_request_limit || `${rl.limit_requests || maxRateLimits.value.requests}/min`,
+          full_token_limit: currentCache?.full_token_limit || ''
+        }
+        
+        // Build display: use API values directly
+        const reqLimit = rl.limit_requests || maxRateLimits.value.requests
+        const reqDisplay = rl.remaining_requests
+          ? `${rl.remaining_requests} von ${reqLimit}/min`
+          : `${reqLimit}/min`
+        
+        // For tokens: build full display from config
+        let tokenDisplay = 'N/A'
+        if (currentCache?.full_token_limit) {
+          const tokenParts = currentCache.full_token_limit.split(',')
+          if (tokenParts.length > 1) {
+            // Multiple limits: show first with remaining, second unchanged
+            const firstLimit = tokenParts[0].trim()
+            const secondLimit = tokenParts[1].trim()
+            const remainingVal = rl.remaining_tokens || 'xxx'
+            tokenDisplay = `${remainingVal} von ${firstLimit}, ${secondLimit}`
+          } else {
+            // Single limit
+            const tokenLimit = rl.limit_tokens || maxRateLimits.value.tokens
+            tokenDisplay = rl.remaining_tokens
+              ? `${rl.remaining_tokens} von ${tokenLimit}/min`
+              : `${tokenLimit}/min`
+          }
+        } else {
+          // Fallback: simple display
+          const tokenLimit = rl.limit_tokens || maxRateLimits.value.tokens
+          tokenDisplay = rl.remaining_tokens
+            ? `${rl.remaining_tokens} von ${tokenLimit}/min`
+            : `${tokenLimit}/min`
+        }
+        
+        rateLimits.value = `🔄 Req Limit: ${reqDisplay} | 🧮 Token Limit: ${tokenDisplay}`
       }
     }
     
