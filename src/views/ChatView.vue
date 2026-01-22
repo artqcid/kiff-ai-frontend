@@ -1,19 +1,21 @@
 <template>
   <div class="chat-view">
     <div class="chat-header">
-      <div class="header-left">
-        <div class="header-chips">
-          <p class="header-info" v-if="currentProfile || currentModel || currentProvider">
-            <span v-if="currentProfile" class="profile-chip">Profil: {{ currentProfileDisplayName }}</span>
-            <span v-if="currentModel" class="model-chip">Modell: {{ currentModelDisplayName }}</span>
-            <span v-if="currentProvider" class="provider-chip">({{ currentProviderDisplayName }})</span>
-            <span v-if="rateLimits" class="limits-chip">{{ rateLimits }}</span>
-          </p>
+      <div class="header-content">
+        <div class="header-row-main">
+          <div class="header-info">
+            <span v-if="currentProfile" class="profile-chip">{{ currentProfileDisplayName }}</span>
+            <span v-if="currentModel" class="model-chip">{{ currentModelDisplayName }}</span>
+            <span v-if="currentProvider" class="provider-chip">{{ currentProviderDisplayName }}</span>
+          </div>
+          <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
+            🗑️ Chat löschen
+          </button>
+        </div>
+        <div class="header-row-limits" v-if="rateLimits">
+          <span class="limits-info">{{ rateLimits }}</span>
         </div>
       </div>
-      <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
-        🗑️ Chat löschen
-      </button>
     </div>
 
     <!-- Clear Chat Success Message -->
@@ -47,7 +49,13 @@
           <div :class="['message', msg.role]">
             <div class="message-header">
               <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
+              <button v-if="msg.role === 'assistant'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip agent-copy" :class="{ copied: copiedMessageId === idx }">
+                {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
+              </button>
               <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
+              <button v-if="msg.role === 'user'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip" :class="{ copied: copiedMessageId === idx }">
+                {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
+              </button>
               <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
                 🔄
               </button>
@@ -90,6 +98,7 @@ const userInput = ref('')
 const inputTextarea = ref<HTMLTextAreaElement | null>(null)
 const loading = ref(false)
 const agentStatus = ref('🤖 Anfrage wird verarbeitet...')
+const copiedMessageId = ref<number | null>(null)
 const currentModel = ref('')
 const currentProfile = ref('')
 const currentProvider = ref('')
@@ -98,6 +107,18 @@ const currentProfileDisplayName = ref('')
 const currentProviderDisplayName = ref('')
 const rateLimits = ref('')
 const maxRateLimits = ref({ requests: '', tokens: '' })
+
+// Load cache from localStorage
+const loadCacheFromStorage = () => {
+  try {
+    const stored = localStorage.getItem('rateLimitsCache')
+    return stored ? JSON.parse(stored) : {}
+  } catch (e) {
+    console.error('Failed to load rate limits cache:', e)
+    return {}
+  }
+}
+
 // Cache für aktuelle Rate Limits pro Model (key: modelId)
 const rateLimitsCache = ref<Record<string, { 
   remaining_requests: string, 
@@ -108,7 +129,17 @@ const rateLimitsCache = ref<Record<string, {
   token_unit: string,
   full_request_limit: string,
   full_token_limit: string
-}>>({})
+}>>(loadCacheFromStorage())
+
+// Save cache to localStorage whenever it changes
+const saveCacheToStorage = () => {
+  try {
+    localStorage.setItem('rateLimitsCache', JSON.stringify(rateLimitsCache.value))
+  } catch (e) {
+    console.error('Failed to save rate limits cache:', e)
+  }
+}
+
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 const showFallbackBanner = ref(false)
@@ -250,8 +281,8 @@ const loadCurrentState = async () => {
               // Initialize cache with max values (no consumption yet) or update if config changed
               if (!existingCache || configChanged) {
                 rateLimitsCache.value[current.model] = {
-                  remaining_requests: reqValue || '',
-                  remaining_tokens: tokenValue || '',
+                  remaining_requests: '', // Empty until first API call
+                  remaining_tokens: '',   // Empty until first API call
                   limit_requests: reqValue || '',
                   limit_tokens: tokenValue || '',
                   request_unit: reqUnit,
@@ -259,9 +290,33 @@ const loadCurrentState = async () => {
                   full_request_limit: reqDisplay,
                   full_token_limit: tokenDisplay
                 }
+                saveCacheToStorage()
+                // Show initial limits without "von" (no consumption data yet)
+                rateLimits.value = `🔄 Req Limit: ${reqDisplay || 'N/A'} | 🧮 Token Limit: ${tokenDisplay || 'N/A'}`
+              } else {
+                // Use cached display (already has consumption data)
+                const cachedLimits = existingCache
+                const reqDisplayCached = cachedLimits.remaining_requests && cachedLimits.full_request_limit
+                  ? `${cachedLimits.remaining_requests} von ${cachedLimits.full_request_limit}`
+                  : cachedLimits.full_request_limit || 'N/A'
+                
+                let tokenDisplayCached = 'N/A'
+                if (cachedLimits.full_token_limit) {
+                  const tokenParts = cachedLimits.full_token_limit.split(',')
+                  if (tokenParts.length > 1) {
+                    const firstLimit = tokenParts[0].trim()
+                    const secondLimit = tokenParts[1].trim()
+                    const remainingVal = cachedLimits.remaining_tokens || 'xxx'
+                    tokenDisplayCached = `${remainingVal} von ${firstLimit}, ${secondLimit}`
+                  } else {
+                    tokenDisplayCached = cachedLimits.remaining_tokens
+                      ? `${cachedLimits.remaining_tokens} von ${cachedLimits.full_token_limit}`
+                      : cachedLimits.full_token_limit
+                  }
+                }
+                
+                rateLimits.value = `🔄 Req Limit: ${reqDisplayCached} | 🧮 Token Limit: ${tokenDisplayCached}`
               }
-              // Show full limit information initially
-              rateLimits.value = `🔄 Req Limit: ${reqDisplay || 'N/A'} | 🧮 Token Limit: ${tokenDisplay || 'N/A'}`
             } else {
               rateLimits.value = ''
             }
@@ -365,6 +420,7 @@ const sendMessage = async () => {
           full_request_limit: currentCache?.full_request_limit || `${rl.limit_requests || maxRateLimits.value.requests}/min`,
           full_token_limit: currentCache?.full_token_limit || ''
         }
+        saveCacheToStorage()
         
         // Build display: use API values directly
         const reqLimit = rl.limit_requests || maxRateLimits.value.requests
@@ -448,6 +504,18 @@ const repeatMessage = async (msg: ChatHistoryItem) => {
   await sendMessage()
 }
 
+const copyMessage = async (content: string, messageIndex: number) => {
+  try {
+    await navigator.clipboard.writeText(content)
+    copiedMessageId.value = messageIndex
+    setTimeout(() => {
+      copiedMessageId.value = null
+    }, 2000)
+  } catch (error) {
+    console.error('Failed to copy message:', error)
+  }
+}
+
 const cancelRequest = () => {
   loading.value = false
   agentStatus.value = ''
@@ -520,13 +588,44 @@ const scrollToBottom = async () => {
 }
 
 .chat-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid #2a2a2a;
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.header-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 1rem;
+}
+
+.header-row-limits {
+  display: flex;
+  align-items: center;
+}
+
+.header-info {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.limits-info {
+  font-size: 0.875rem;
+  color: #888;
+  font-family: monospace;
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
 }
 
 .header-left {
@@ -539,14 +638,6 @@ const scrollToBottom = async () => {
   gap: 0.5rem;
   flex-wrap: wrap;
   align-items: center;
-}
-
-.header-info {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 0.5rem;
 }
 
 .model-chip,
@@ -788,8 +879,38 @@ const scrollToBottom = async () => {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
-.profile-chip {
+.btn-copy-chip {
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: #888;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
   margin-left: auto;
+  margin-right: 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.btn-copy-chip.agent-copy {
+  margin-left: auto;
+  margin-right: 0.5rem;
+}
+
+.btn-copy-chip:hover {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.btn-copy-chip.copied {
+  background-color: #4ade8022;
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.profile-chip {
+  margin-left: 0;
   margin-right: 0.5rem;
   background-color: #0a0a0a;
   border: 1px solid #2a2a2a;
