@@ -194,7 +194,7 @@ const loadCurrentState = async () => {
     currentProfileDisplayName.value = current.profile_display_name
     currentModelShortName.value = current.model_short_name
     
-    // Load rate limits for remote providers
+    // Load rate limits for remote providers; local has no limits
     if (current.provider !== 'lokal') {
       try {
         // Check cache first for current model
@@ -329,7 +329,7 @@ const loadCurrentState = async () => {
         rateLimits.value = ''
       }
     } else {
-      rateLimits.value = ''
+      rateLimits.value = '🔄 Req Limit: unlimitiert | 🧮 Token Limit: unlimitiert'
     }
   } catch (e) {
     console.error('Failed to load current state:', e)
@@ -385,8 +385,10 @@ const sendMessage = async () => {
       messages: [{ role: 'user', content: input }]
     })
     
-    // Update rate limits from response metadata
-    if (response.metadata?.rate_limits) {
+    // Update rate limits from response metadata (remote) or mark unlimited (local)
+    if (currentProvider.value === 'lokal') {
+      rateLimits.value = '🔄 Req Limit: unlimitiert | 🧮 Token Limit: unlimitiert'
+    } else if (response.metadata?.rate_limits) {
       const rl = response.metadata.rate_limits
       
       // Update max limits if provided in response (override stored values)
