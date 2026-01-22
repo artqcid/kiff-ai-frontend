@@ -1,86 +1,111 @@
 <template>
   <div class="chat-view">
-    <div class="chat-header">
-      <div class="header-content">
-        <div class="header-row-main">
-          <div class="header-info">
-            <span v-if="currentProfile" class="profile-chip"><strong>Profil:</strong> {{ currentProfileDisplayName }}</span>
-            <span v-if="currentModel" class="model-chip"><strong>Model:</strong> {{ currentModelDisplayName }}</span>
-            <span v-if="currentProvider" class="provider-chip">Provider: {{ currentProviderDisplayName }}</span>
-          </div>
-          <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
-            🗑️ Chat löschen
-          </button>
-        </div>
-        <div class="header-row-limits" v-if="rateLimits">
-          <span class="limits-info">{{ rateLimits }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Clear Chat Success Message -->
-    <div v-if="clearChatSuccess" class="clear-chat-success">
-      ✅ Chat-Verlauf erfolgreich gelöscht
-    </div>
-
-    <!-- Fallback Banner -->
-    <div v-if="showFallbackBanner" class="fallback-banner">
-      ⚠️ Provider derzeit nicht verfügbar - Fallback zu Lokal aktiviert
-    </div>
-
-    <div class="status-bar" v-if="loading">
-      <span class="spinner"></span>
-      <span>{{ agentStatus }}</span>
-      <button @click="cancelRequest" class="btn-cancel">❌ Abbrechen</button>
-    </div>
-
-    <div class="chat-messages" ref="messagesContainer">
-      <div v-if="messages.length === 0" class="empty-state">
-        Noch keine Nachrichten. Stelle eine Frage!
-      </div>
-      <div v-for="(msg, idx) in messages" :key="idx">
-        <div v-if="msg.cancelled" class="message-cancelled">
-          ❌ <strong>Anfrage abgebrochen</strong>
-        </div>
-        <div v-else class="message-wrapper" :class="msg.role">
-          <div v-if="msg.role === 'user' && msg.timestamp" class="message-time-outside left">
-            {{ formatTime(msg.timestamp) }}
-          </div>
-          <div :class="['message', msg.role]">
-            <div class="message-header">
-              <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
-              <button v-if="msg.role === 'assistant'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip agent-copy" :class="{ copied: copiedMessageId === idx }">
-                {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
-              </button>
-              <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
-              <button v-if="msg.role === 'user'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip" :class="{ copied: copiedMessageId === idx }">
-                {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
-              </button>
-              <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon btn-repeat" data-tooltip="Frage wiederholen">
-                🔄
+    <div class="chat-layout">
+      <div class="chat-main">
+        <div class="chat-header">
+          <div class="header-content">
+            <div class="header-row-main">
+              <div class="header-info">
+                <span v-if="currentProfile" class="profile-chip"><strong>Profil:</strong> {{ currentProfileDisplayName }}</span>
+                <span v-if="currentModel" class="model-chip"><strong>Model:</strong> {{ currentModelDisplayName }}</span>
+                <span v-if="currentProvider" class="provider-chip">Provider: {{ currentProviderDisplayName }}</span>
+              </div>
+              <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
+                🗑️ Chat löschen
               </button>
             </div>
-            <div class="message-content">{{ msg.content }}</div>
-          </div>
-          <div v-if="msg.role === 'assistant' && msg.timestamp" class="message-time-outside right">
-            {{ formatTime(msg.timestamp) }}
+            <div class="header-row-limits" v-if="rateLimits">
+              <span class="limits-info">{{ rateLimits }}</span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div class="chat-input">
-      <textarea
-        ref="inputTextarea"
-        v-model="userInput"
-        @keydown.enter="handleEnter"
-        placeholder="z.B. 'Erstelle ein Betriebskonzept für unser Event...'"
-        rows="3"
-        :disabled="loading"
-      ></textarea>
-      <button @click="sendMessage" :disabled="!userInput.trim() || loading" class="btn-primary">
-        {{ loading ? 'Sende...' : 'Senden ➤' }}
-      </button>
+        <!-- Clear Chat Success Message -->
+        <div v-if="clearChatSuccess" class="clear-chat-success">
+          ✅ Chat-Verlauf erfolgreich gelöscht
+        </div>
+
+        <!-- Fallback Banner -->
+        <div v-if="showFallbackBanner" class="fallback-banner">
+          ⚠️ Provider derzeit nicht verfügbar - Fallback zu Lokal aktiviert
+        </div>
+
+        <div class="status-bar" v-if="loading">
+          <span class="spinner"></span>
+          <span>{{ agentStatus }}</span>
+          <button @click="cancelRequest" class="btn-cancel">❌ Abbrechen</button>
+        </div>
+
+        <div class="chat-messages" ref="messagesContainer">
+          <div v-if="messages.length === 0" class="empty-state">
+            Noch keine Nachrichten. Stelle eine Frage!
+          </div>
+          <div v-for="(msg, idx) in messages" :key="idx">
+            <div v-if="msg.cancelled" class="message-cancelled">
+              ❌ <strong>Anfrage abgebrochen</strong>
+            </div>
+            <div v-else class="message-wrapper" :class="msg.role">
+              <div v-if="msg.role === 'user' && msg.timestamp" class="message-time-outside left">
+                {{ formatTime(msg.timestamp) }}
+              </div>
+              <div :class="['message', msg.role]">
+                <div class="message-header">
+                  <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
+                  <button v-if="msg.role === 'assistant'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip agent-copy" :class="{ copied: copiedMessageId === idx }">
+                    {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
+                  </button>
+                  <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
+                  <button v-if="msg.role === 'user'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip" :class="{ copied: copiedMessageId === idx }">
+                    {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
+                  </button>
+                  <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon btn-repeat" data-tooltip="Frage wiederholen">
+                    🔄
+                  </button>
+                </div>
+                <div class="message-content">{{ msg.content }}</div>
+              </div>
+              <div v-if="msg.role === 'assistant' && msg.timestamp" class="message-time-outside right">
+                {{ formatTime(msg.timestamp) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-input">
+          <textarea
+            ref="inputTextarea"
+            v-model="userInput"
+            @keydown.enter="handleEnter"
+            placeholder="z.B. 'Erstelle ein Betriebskonzept für unser Event...'"
+            rows="3"
+            :disabled="loading"
+          ></textarea>
+          <button @click="sendMessage" :disabled="!userInput.trim() || loading" class="btn-primary">
+            {{ loading ? 'Sende...' : 'Senden ➤' }}
+          </button>
+        </div>
+      </div>
+
+      <aside class="chat-sidebar">
+        <div class="sidebar-header">Verlauf</div>
+        <div class="conversation-list">
+          <div v-if="conversationOverview.length === 0" class="no-conversations">Noch keine Verläufe</div>
+          <div
+            v-for="conv in conversationOverview"
+            :key="conv.id"
+            class="conversation-chip"
+          >
+            <div class="chip-header">
+              <div class="chip-title">{{ conv.title }}</div>
+              <button class="chip-delete" @click.stop="deleteConversation(conv)" title="Verlauf löschen">✕</button>
+            </div>
+            <div class="chip-meta">
+              <span class="chip-provider">{{ conv.provider }}</span>
+              <span class="chip-profile">{{ conv.profile }}</span>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -107,6 +132,7 @@ const currentProfileDisplayName = ref('')
 const currentProviderDisplayName = ref('')
 const rateLimits = ref('')
 const maxRateLimits = ref({ requests: '', tokens: '' })
+const conversationOverview = ref<Array<{ id: string; title: string; provider: string; profile: string; timestamp?: string }>>([])
 
 // Load cache from localStorage
 const loadCacheFromStorage = () => {
@@ -346,9 +372,13 @@ const loadHistory = async () => {
       if (m.role === 'assistant' && !m.profile) {
         m.profile = currentProfile.value || 'general_chat'
       }
+      if (m.role === 'assistant' && !m.provider) {
+        m.provider = currentProvider.value
+      }
       return m
     })
     messages.value = hist
+    buildConversationOverview()
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to load history:', error)
@@ -473,7 +503,8 @@ const sendMessage = async () => {
       content: response.response,
       timestamp: new Date().toISOString(),
       profile: response.profile,
-      model: response.model
+      model: response.model,
+      provider: currentProvider.value
     })
 
     if (response.model) {
@@ -533,12 +564,55 @@ const cancelRequest = () => {
     }
   }
 }
+
+const buildConversationOverview = () => {
+  const map = new Map<string, { id: string; title: string; provider: string; profile: string; timestamp?: string }>()
+  let lastUser: ChatHistoryItem | null = null
+
+  for (const msg of messages.value) {
+    if (msg.role === 'user') {
+      lastUser = msg
+      continue
+    }
+    if (msg.role === 'assistant' && msg.provider && msg.profile) {
+      const key = `${msg.provider}::${msg.profile}`
+      const rawTitle = lastUser?.content?.trim() || 'Neue Unterhaltung'
+      const titleLine = rawTitle.split('\n')[0] || rawTitle
+      const title = titleLine.length > 80 ? `${titleLine.slice(0, 80)}…` : titleLine
+      map.set(key, {
+        id: key,
+        title,
+        provider: msg.provider,
+        profile: msg.profile,
+        timestamp: msg.timestamp
+      })
+    }
+  }
+
+  conversationOverview.value = Array.from(map.values()).sort((a, b) => {
+    const ta = a.timestamp || ''
+    const tb = b.timestamp || ''
+    return tb.localeCompare(ta)
+  })
+}
+
+const deleteConversation = async (conv: { provider: string; profile: string }) => {
+  if (!confirm('⚠️ Verlauf wirklich löschen?')) return
+  try {
+    await apiClient.deleteChatHistoryForContext(conv.provider, conv.profile)
+    await loadHistory()
+  } catch (error) {
+    console.error('Failed to delete conversation:', error)
+  }
+}
+
 const clearChat = async () => {
   if (!confirm('⚠️ Chat-Verlauf wirklich löschen?')) return
   
   try {
     await apiClient.clearChatHistory()
     messages.value = []
+    conversationOverview.value = []
     showFallbackBanner.value = false
     
     // Show success message
@@ -590,6 +664,112 @@ const scrollToBottom = async () => {
   flex-direction: column;
   height: 100vh;
   padding: 1.5rem;
+}
+
+.chat-layout {
+  display: flex;
+  height: 100%;
+  gap: 1rem;
+}
+
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.chat-sidebar {
+  width: 240px;
+  min-width: 200px;
+  background-color: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sidebar-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #e5e7eb;
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+  padding-right: 0.25rem;
+}
+
+.conversation-chip {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background-color: #111;
+  border: 1px solid #1f1f1f;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  cursor: default;
+}
+
+.chip-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chip-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #f3f4f6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-delete {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.chip-delete:hover {
+  background-color: #2a2a2a;
+  color: #f87171;
+}
+
+.chip-meta {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.chip-provider,
+.chip-profile {
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 0.15rem 0.5rem;
+}
+
+.no-conversations {
+  color: #777;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.25rem;
 }
 
 .chat-header {

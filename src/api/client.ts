@@ -35,6 +35,7 @@ export interface ChatHistoryItem {
   cancelled?: boolean
   profile?: string
   model?: string
+  provider?: string
 }
 
 export interface ServerStatus {
@@ -231,6 +232,11 @@ class ApiClient {
 
   async clearChatHistory(): Promise<any> {
     const response = await this.client.delete('/history')
+    return response.data
+  }
+
+  async deleteChatHistoryForContext(provider: string, profile: string): Promise<any> {
+    const response = await this.client.delete(`/history/${provider}/${profile}`)
     return response.data
   }
 
