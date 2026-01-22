@@ -86,9 +86,16 @@
         </div>
       </div>
 
-      <aside class="chat-sidebar">
-        <div class="sidebar-header">Verlauf</div>
-        <div class="conversation-list">
+      <aside class="chat-sidebar" ref="chatSidebar" :class="{ collapsed: sidebarCollapsed }" :style="{ width: sidebarCollapsed ? '50px' : sidebarWidth + 'px' }">
+        <div v-if="!sidebarCollapsed" class="sidebar-resize-handle" @mousedown="startResize"></div>
+        <div v-if="!sidebarCollapsed" class="sidebar-header">
+          <button class="btn-collapse" @click="toggleSidebar" title="Sidebar schließen">></button>
+          <span>Verlauf</span>
+        </div>
+        <div v-if="sidebarCollapsed" class="sidebar-collapsed-content">
+          <button class="btn-expand" @click="toggleSidebar" title="Sidebar öffnen"><</button>
+        </div>
+        <div v-if="!sidebarCollapsed" class="conversation-list">
           <div v-if="conversationOverview.length === 0" class="no-conversations">Noch keine Verläufe</div>
           <div
             v-for="conv in conversationOverview"
@@ -133,7 +140,10 @@ const currentProviderDisplayName = ref('')
 const rateLimits = ref('')
 const maxRateLimits = ref({ requests: '', tokens: '' })
 const conversationOverview = ref<Array<{ id: string; title: string; provider: string; profile: string; timestamp?: string }>>([])
-
+const chatSidebar = ref<HTMLElement | null>(null)
+const sidebarWidth = ref(240)
+const isResizing = ref(false)
+const sidebarCollapsed = ref(false)
 // Load cache from localStorage
 const loadCacheFromStorage = () => {
   try {
@@ -186,6 +196,18 @@ const handleProfileChanged = async () => {
 onMounted(async () => {
   await loadCurrentState()
   await loadHistory()
+  
+  // Load sidebar width from localStorage
+  const savedWidth = localStorage.getItem('sidebarWidth')
+  if (savedWidth) {
+    sidebarWidth.value = parseInt(savedWidth, 10)
+  }
+  
+  // Load sidebar collapsed state
+  const savedCollapsed = localStorage.getItem('sidebarCollapsed')
+  if (savedCollapsed === 'true') {
+    sidebarCollapsed.value = true
+  }
   
   // Listen for model/profile changes from SettingsView
   window.addEventListener('modelChanged', handleModelChanged)
@@ -622,6 +644,36 @@ const updateTooltipPosition = (event: MouseEvent) => {
   }
 }
 
+const startResize = (e: MouseEvent) => {
+  isResizing.value = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+  
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isResizing.value) return
+    
+    // Calculate new width (sidebar grows to the left, so we subtract)
+    const delta = startX - e.clientX
+    const newWidth = Math.max(200, Math.min(600, startWidth + delta))
+    sidebarWidth.value = newWidth
+  }
+  
+  const onMouseUp = () => {
+    isResizing.value = false
+    localStorage.setItem('sidebarWidth', sidebarWidth.value.toString())
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+  }
+  
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
+
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('sidebarCollapsed', sidebarCollapsed.value.toString())
+}
+
 const clearChat = async () => {
   if (!confirm('⚠️ Chat-Verlauf wirklich löschen?')) return
   
@@ -697,8 +749,9 @@ const scrollToBottom = async () => {
 }
 
 .chat-sidebar {
-  width: 240px;
+  position: relative;
   min-width: 200px;
+  max-width: 600px;
   background-color: #0a0a0a;
   border: 1px solid #1f1f1f;
   border-radius: 8px;
@@ -706,12 +759,85 @@ const scrollToBottom = async () => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  user-select: none;
+  transition: width 0.3s ease;
+}
+
+.chat-sidebar.collapsed {
+  min-width: 50px;
+  padding: 0.5rem;
+}
+
+.sidebar-collapsed-content {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.btn-expand {
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.2rem;
+  font-weight: bold;
+  border-radius: 4px;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.btn-expand:hover {
+  background-color: #646cff;
+  color: #fff;
+  border-color: #646cff;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background-color 0.2s;
+}
+
+.sidebar-resize-handle:hover {
+  background-color: #646cff;
+}
+
+.sidebar-resize-handle:active {
+  background-color: #747bff;
 }
 
 .sidebar-header {
   font-weight: 600;
   font-size: 0.95rem;
   color: #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-collapse {
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.2rem;
+  font-weight: bold;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.btn-collapse:hover {
+  background-color: #646cff;
+  color: #fff;
+  border-color: #646cff;
 }
 
 .conversation-list {
@@ -747,6 +873,8 @@ const scrollToBottom = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .chip-delete {
@@ -769,9 +897,10 @@ const scrollToBottom = async () => {
 .chip-meta {
   display: flex;
   gap: 0.4rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   font-size: 0.8rem;
   color: #9ca3af;
+  min-width: 0;
 }
 
 .chip-provider,
@@ -780,6 +909,11 @@ const scrollToBottom = async () => {
   border: 1px solid #2a2a2a;
   border-radius: 12px;
   padding: 0.15rem 0.5rem;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .no-conversations {
@@ -1042,12 +1176,12 @@ const scrollToBottom = async () => {
 
 .message.user {
   background-color: #353535;
-  border-left: 3px solid #646cff;
+  border-left: 3px solid #10b981;
 }
 
 .message.assistant {
   background-color: #1a1a1a;
-  border-left: 3px solid #10b981;
+  border-left: 3px solid #646cff;
 }
 
 .message-cancelled {
