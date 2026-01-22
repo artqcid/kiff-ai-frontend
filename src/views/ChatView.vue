@@ -4,9 +4,9 @@
       <div class="header-content">
         <div class="header-row-main">
           <div class="header-info">
-            <span v-if="currentProfile" class="profile-chip">{{ currentProfileDisplayName }}</span>
-            <span v-if="currentModel" class="model-chip">{{ currentModelDisplayName }}</span>
-            <span v-if="currentProvider" class="provider-chip">{{ currentProviderDisplayName }}</span>
+            <span v-if="currentProfile" class="profile-chip"><strong>Profil:</strong> {{ currentProfileDisplayName }}</span>
+            <span v-if="currentModel" class="model-chip"><strong>Model:</strong> {{ currentModelDisplayName }}</span>
+            <span v-if="currentProvider" class="provider-chip">Provider: {{ currentProviderDisplayName }}</span>
           </div>
           <button @click="clearChat" class="btn-clear-chat" title="Chat-Verlauf löschen">
             🗑️ Chat löschen
@@ -56,7 +56,7 @@
               <button v-if="msg.role === 'user'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip" :class="{ copied: copiedMessageId === idx }">
                 {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
               </button>
-              <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
+              <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon btn-repeat" data-tooltip="Frage wiederholen">
                 🔄
               </button>
             </div>
@@ -73,7 +73,7 @@
       <textarea
         ref="inputTextarea"
         v-model="userInput"
-        @keydown.enter.prevent="handleEnter"
+        @keydown.enter="handleEnter"
         placeholder="z.B. 'Erstelle ein Betriebskonzept für unser Event...'"
         rows="3"
         :disabled="loading"
@@ -563,7 +563,10 @@ const handleEnter = async (e: KeyboardEvent) => {
     return
   }
   // Enter ohne Shift = senden
-  await sendMessage()
+  e.preventDefault()
+  if (userInput.value.trim() && !loading.value) {
+    await sendMessage()
+  }
 }
 
 const formatTime = (timestamp: string) => {
@@ -650,6 +653,12 @@ const scrollToBottom = async () => {
   padding: 0.25rem 0.75rem;
   font-size: 0.9rem;
   color: #9ca3af;
+  font-weight: normal;
+}
+
+.model-chip strong,
+.profile-chip strong {
+  font-weight: 600;
 }
 
 .provider-chip {
@@ -834,7 +843,7 @@ const scrollToBottom = async () => {
 }
 
 .message.user {
-  background-color: #0a2a52;
+  background-color: #353535;
   border-left: 3px solid #646cff;
 }
 
@@ -868,15 +877,17 @@ const scrollToBottom = async () => {
 .btn-icon {
   background: transparent;
   border: none;
-  font-size: 1rem;
+  font-size: 1.25rem;
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   transition: background-color 0.2s;
+  filter: brightness(0.7);
 }
 
 .btn-icon:hover {
   background-color: rgba(255, 255, 255, 0.1);
+  filter: brightness(1);
 }
 
 .btn-copy-chip {
@@ -991,25 +1002,59 @@ textarea:disabled {
 }
 
 .btn-primary {
-  padding: 0.75rem 1.5rem;
-  background-color: #646cff;
-  color: white;
+  padding: 0.5rem 1rem;
+  background-color: #15803d;
+  color: #ffffff;
   border: none;
   border-radius: 8px;
   font-size: 1rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #535bf2;
+  background-color: #22c55e;
   transform: translateY(-1px);
 }
 
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Custom Tooltip */
+.btn-repeat {
+  position: relative;
+}
+
+.btn-repeat[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #2a2a2a;
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  margin-bottom: 0.5rem;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.btn-repeat[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #2a2a2a;
+  margin-bottom: -0.3rem;
+  z-index: 1000;
 }
 </style>

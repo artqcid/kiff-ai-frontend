@@ -696,12 +696,17 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
 }
 
 .form-group label {
   font-weight: 500;
   color: #999;
   font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .form-group select {
@@ -711,6 +716,15 @@ h2 {
   border-radius: 4px;
   color: #fff;
   font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-group select option {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .form-group select:focus {
@@ -732,15 +746,23 @@ h2 {
   display: flex;
   justify-content: space-between;
   font-size: 0.875rem;
+  min-width: 0;
 }
 
 .detail-label {
   color: #999;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
 }
 
 .detail-value {
   color: #fff;
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  text-align: right;
 }
 
 .no-models {
