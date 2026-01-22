@@ -58,7 +58,7 @@
                   <button v-if="msg.role === 'user'" @click="copyMessage(msg.content, idx)" class="btn-copy-chip" :class="{ copied: copiedMessageId === idx }">
                     {{ copiedMessageId === idx ? 'Copied ✓' : 'Copy' }}
                   </button>
-                  <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon btn-repeat" data-tooltip="Frage wiederholen">
+                  <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon tooltip-btn" data-tooltip="Frage wiederholen" @mouseenter="updateTooltipPosition">
                     🔄
                   </button>
                 </div>
@@ -97,7 +97,7 @@
           >
             <div class="chip-header">
               <div class="chip-title">{{ conv.title }}</div>
-              <button class="chip-delete" @click.stop="deleteConversation(conv)" title="Verlauf löschen">✕</button>
+              <button class="chip-delete tooltip-btn" @click.stop="deleteConversation(conv)" data-tooltip="Verlauf löschen" @mouseenter="updateTooltipPosition">✕</button>
             </div>
             <div class="chip-meta">
               <span class="chip-provider">{{ conv.provider }}</span>
@@ -603,6 +603,22 @@ const deleteConversation = async (conv: { provider: string; profile: string }) =
     await loadHistory()
   } catch (error) {
     console.error('Failed to delete conversation:', error)
+  }
+}
+
+const updateTooltipPosition = (event: MouseEvent) => {
+  const target = event.currentTarget as HTMLElement
+  if (!target) return
+  
+  // Check if button is near right edge of viewport
+  const rect = target.getBoundingClientRect()
+  const distanceFromRight = window.innerWidth - rect.right
+  
+  // If less than 150px from right edge, align tooltip to the right
+  if (distanceFromRight < 150) {
+    target.classList.add('align-right')
+  } else {
+    target.classList.remove('align-right')
   }
 }
 
@@ -1207,36 +1223,52 @@ textarea:disabled {
 }
 
 /* Custom Tooltip */
-.btn-repeat {
+.tooltip-btn {
   position: relative;
 }
 
-.btn-repeat[data-tooltip]:hover::after {
+.tooltip-btn[data-tooltip]:hover::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
   background-color: #2a2a2a;
   color: #fff;
-  padding: 0.5rem 0.75rem;
+  padding: 0.6rem 0.85rem;
   border-radius: 4px;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  margin-bottom: 0.5rem;
-  z-index: 1000;
+  font-size: 0.95rem;
+  white-space: normal;
+  z-index: 10000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  max-width: 180px;
+  text-align: center;
+  word-wrap: break-word;
 }
 
-.btn-repeat[data-tooltip]:hover::before {
+.tooltip-btn[data-tooltip]:hover::before {
   content: '';
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 2px);
   left: 50%;
   transform: translateX(-50%);
   border: 6px solid transparent;
   border-top-color: #2a2a2a;
-  margin-bottom: -0.3rem;
-  z-index: 1000;
+  z-index: 10000;
+}
+
+/* For buttons near the right edge, align tooltip to the right */
+.tooltip-btn[data-tooltip].align-right:hover::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+  z-index: 100000;
+}
+
+.tooltip-btn[data-tooltip].align-right:hover::before {
+  left: auto;
+  right: 10px;
+  transform: translateX(0);
+  z-index: 100000;
 }
 </style>
