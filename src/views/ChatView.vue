@@ -41,16 +41,21 @@
         <div v-if="msg.cancelled" class="message-cancelled">
           ❌ <strong>Anfrage abgebrochen</strong>
         </div>
-        <div v-else :class="['message', msg.role]">
-          <div class="message-header">
-            <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
-            <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
-            <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
-              🔄
-            </button>
+        <div v-else class="message-wrapper" :class="msg.role">
+          <div v-if="msg.role === 'user' && msg.timestamp" class="message-time-outside left">
+            {{ formatTime(msg.timestamp) }}
           </div>
-          <div class="message-content">{{ msg.content }}</div>
-          <div class="message-time" v-if="msg.timestamp">
+          <div :class="['message', msg.role]">
+            <div class="message-header">
+              <strong>{{ msg.role === 'user' ? '👤 Du' : '🤖 Agent' }}:</strong>
+              <span v-if="msg.role === 'assistant'" class="profile-chip">Profil: {{ msg.profile || currentProfile || 'general_chat' }}</span>
+              <button v-if="msg.role === 'user'" @click="repeatMessage(msg)" class="btn-icon" title="Frage wiederholen">
+                🔄
+              </button>
+            </div>
+            <div class="message-content">{{ msg.content }}</div>
+          </div>
+          <div v-if="msg.role === 'assistant' && msg.timestamp" class="message-time-outside right">
             {{ formatTime(msg.timestamp) }}
           </div>
         </div>
@@ -541,10 +546,11 @@ const scrollToBottom = async () => {
 }
 
 .message {
-  margin-bottom: 1rem;
   padding: 1rem;
   border-radius: 8px;
   animation: fadeIn 0.3s ease-in;
+  flex: 1;
+  min-width: 0;
 }
 
 @keyframes fadeIn {
@@ -560,13 +566,11 @@ const scrollToBottom = async () => {
 
 .message.user {
   background-color: #0a2a52;
-  margin-left: 10%;
   border-left: 3px solid #646cff;
 }
 
 .message.assistant {
   background-color: #1a1a1a;
-  margin-right: 10%;
   border-left: 3px solid #10b981;
 }
 
@@ -627,11 +631,35 @@ const scrollToBottom = async () => {
   word-wrap: break-word;
 }
 
-.message-time {
-  font-size: 0.75rem;
-  color: #666;
-  margin-top: 0.5rem;
-  text-align: right;
+.message-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.message-wrapper.user {
+  margin-left: 10%;
+}
+
+.message-wrapper.assistant {
+  margin-right: 10%;
+}
+
+.message-time-outside {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  padding-top: 1rem;
+  flex-shrink: 0;
+}
+
+.message-time-outside.left {
+  order: -1;
+}
+
+.message-time-outside.right {
+  order: 1;
 }
 
 .chat-input {
