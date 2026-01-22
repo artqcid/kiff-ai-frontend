@@ -2,7 +2,6 @@
   <div class="chat-view">
     <div class="chat-header">
       <div class="header-left">
-        <h2>💬 Chat mit Agent</h2>
         <div class="header-chips">
           <p class="header-info" v-if="currentProfile || currentModel || currentProvider">
             <span v-if="currentProfile" class="profile-chip">Profil: {{ currentProfileDisplayName }}</span>
@@ -64,6 +63,7 @@
 
     <div class="chat-input">
       <textarea
+        ref="inputTextarea"
         v-model="userInput"
         @keydown.enter.prevent="handleEnter"
         placeholder="z.B. 'Erstelle ein Betriebskonzept für unser Event...'"
@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, inject, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, inject, computed } from 'vue'
 import { apiClient, type ChatHistoryItem, type CurrentProviderResponse } from '../api/client'
 
 const props = defineProps<{
@@ -87,6 +87,7 @@ const props = defineProps<{
 
 const messages = ref<ChatHistoryItem[]>([])
 const userInput = ref('')
+const inputTextarea = ref<HTMLTextAreaElement | null>(null)
 const loading = ref(false)
 const agentStatus = ref('🤖 Anfrage wird verarbeitet...')
 const currentModel = ref('')
@@ -96,6 +97,7 @@ const currentModelShortName = ref('')
 const currentProfileDisplayName = ref('')
 const currentProviderDisplayName = ref('')
 const rateLimits = ref('')
+const maxRateLimits = ref({ requests: '', tokens: '' })
 const messagesContainer = ref<HTMLElement | null>(null)
 const clearChatTrigger = inject<any>('clearChatTrigger', ref(0))
 const showFallbackBanner = ref(false)
@@ -105,9 +107,27 @@ let clearSuccessTimer: number | null = null
 // Computed properties for display names
 const currentModelDisplayName = computed(() => currentModelShortName.value || currentModel.value)
 
+// Event handlers for model/profile changes
+const handleModelChanged = async () => {
+  await loadCurrentState()
+}
+const handleProfileChanged = async () => {
+  await loadCurrentState()
+}
+
 onMounted(async () => {
   await loadCurrentState()
   await loadHistory()
+  
+  // Listen for model/profile changes from SettingsView
+  window.addEventListener('modelChanged', handleModelChanged)
+  window.addEventListener('profileChanged', handleProfileChanged)
+})
+
+// Cleanup event listeners
+onUnmounted(() => {
+  window.removeEventListener('modelChanged', handleModelChanged)
+  window.removeEventListener('profileChanged', handleProfileChanged)
 })
 
 // Watch for clear chat trigger from parent
@@ -124,6 +144,7 @@ watch(() => props.serverRunning, (isRunning) => {
 const loadCurrentState = async () => {
   try {
     const current: CurrentProviderResponse = await apiClient.getCurrentProvider()
+    
     currentProfile.value = current.profile
     currentProvider.value = current.provider
     currentModel.value = current.model
@@ -145,6 +166,8 @@ const loadCurrentState = async () => {
           if (tokenLimit) tokenLimit = tokenLimit.split('(')[0].trim()
           
           if (reqLimit || tokenLimit) {
+            // Store max limits for later use
+            maxRateLimits.value = { requests: reqLimit || '', tokens: tokenLimit || '' }
             rateLimits.value = `🔄 bis ${reqLimit || 'N/A'} | 🧮 bis ${tokenLimit || 'N/A'}`
           } else {
             rateLimits.value = ''
@@ -217,7 +240,13 @@ const sendMessage = async () => {
     if (response.metadata?.rate_limits) {
       const rl = response.metadata.rate_limits
       if (rl.remaining_requests || rl.remaining_tokens) {
-        rateLimits.value = `🔄 ${rl.remaining_requests || 'N/A'} | 🧮 ${rl.remaining_tokens || 'N/A'}`
+        const reqDisplay = rl.remaining_requests 
+          ? `${rl.remaining_requests} von ${maxRateLimits.value.requests}` 
+          : 'N/A'
+        const tokenDisplay = rl.remaining_tokens 
+          ? `${rl.remaining_tokens} von ${maxRateLimits.value.tokens}` 
+          : 'N/A'
+        rateLimits.value = `🔄 ${reqDisplay} | 🧮 ${tokenDisplay}`
       }
     }
     
@@ -254,6 +283,10 @@ const sendMessage = async () => {
     loading.value = false
     agentStatus.value = ''
     await scrollToBottom()
+    
+    // Refocus textarea for next input
+    await nextTick()
+    inputTextarea.value?.focus()
   }
 }
 
@@ -295,11 +328,11 @@ const clearChat = async () => {
       clearTimeout(clearSuccessTimer)
     }
     
-    // Hide after 10 seconds
+    // Hide after 5 seconds
     clearSuccessTimer = window.setTimeout(() => {
       clearChatSuccess.value = false
       clearSuccessTimer = null
-    }, 10000)
+    }, 5000)
   } catch (error) {
     console.error('Failed to clear chat:', error)
     alert('❌ Fehler beim Löschen des Chats')
@@ -348,12 +381,6 @@ const scrollToBottom = async () => {
 .header-left {
   flex: 1;
   min-width: 0;
-}
-
-.chat-header h2 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
 }
 
 .header-chips {

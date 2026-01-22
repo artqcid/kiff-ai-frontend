@@ -126,14 +126,6 @@
               <span class="detail-value">{{ selectedModelInfo.metadata?.token_limit || 'N/A' }}</span>
             </div>
           </div>
-          
-          <button 
-            @click="saveSettings" 
-            :disabled="loading" 
-            class="btn-success"
-          >
-            💾 Speichern
-          </button>
         </div>
         <div v-else class="no-models">
           <p>⚠️ Keine Modelle für dieses Profil und Provider verfügbar.</p>
@@ -217,9 +209,24 @@ watch(currentProvider, async (newProvider) => {
   await loadModelsForProfile()
 })
 
-// Watch profile changes
-watch(selectedProfile, async (newProfile) => {
+// Watch provider changes
+watch(currentProvider, async (newProvider) => {
   await loadModelsForProfile()
+})
+
+// Watch model changes (when user manually changes model in dropdown)
+watch(selectedModel, async (newModel, oldModel) => {
+  // Only trigger if model changed and not during initial load
+  if (newModel && oldModel && newModel !== oldModel) {
+    try {
+      await apiClient.setModel(newModel)
+      // Notify other components about model change
+      const event = new Event('modelChanged')
+      window.dispatchEvent(event)
+    } catch (error) {
+      console.error('Failed to set model:', error)
+    }
+  }
 })
 
 // Methods
@@ -253,10 +260,20 @@ const loadModelsForProfile = async () => {
     )
     availableModels.value = response.models
     
-    // Set default model if not already set
-    if (availableModels.value.length > 0 && !selectedModel.value) {
+    // Always set the default model when loading models for a new profile
+    if (availableModels.value.length > 0) {
       const defaultModel = availableModels.value.find(m => m.is_default)
       selectedModel.value = defaultModel?.model_id || availableModels.value[0].model_id
+      
+      // Update backend with new model selection
+      try {
+        await apiClient.setModel(selectedModel.value)
+        // Notify other components (ChatView) about model change
+        const event = new Event('modelChanged')
+        window.dispatchEvent(event)
+      } catch (error) {
+        console.error('Failed to set model:', error)
+      }
     }
   } catch (error) {
     console.error('Failed to load models:', error)
@@ -371,15 +388,15 @@ const cancelApiKey = () => {
 }
 
 const selectProfile = async (profileName: string) => {
-  if (profileName === selectedProfile.value) return // Already selected
-  
-  selectedProfile.value = profileName
   loading.value = true
   
   try {
     await apiClient.setProfile(profileName)
     showStatus(`✅ Profil gewechselt zu '${profileName}'`, 'success')
     await loadModelsForProfile()
+    // Notify other components about profile change
+    const event = new Event('profileChanged')
+    window.dispatchEvent(event)
   } catch (error) {
     console.error('Failed to change profile:', error)
     showStatus(`❌ Fehler beim Profil-Wechsel: ${error}`, 'error')

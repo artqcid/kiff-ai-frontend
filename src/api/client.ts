@@ -347,6 +347,11 @@ class ApiClient {
     )
     return response.data
   }
+
+  async setModel(modelId: string): Promise<any> {
+    const response = await this.client.post(`/model/${modelId}/set`)
+    return response.data
+  }
 }
 
 export const apiClient = new ApiClient()
